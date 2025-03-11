@@ -80,7 +80,8 @@ class ModelManager:
                 _save_path, _exp, model, _, _, thresholds, train_processed, test_processed = _iteration
 
                 # run evaluator
-                evaluator = Evaluator(_save_path, _exp, thresholds, output_patient_csv=self.config, cv_mode=False)
+                evaluator = Evaluator(
+                    _save_path, _exp, thresholds, output_patient_csv=self._output_patient_csv, cv_mode=False)
                 evaluator.evaluate(train_processed, test_processed, generate_night_output=self._log_night_level)
 
                 pbar.update(1)

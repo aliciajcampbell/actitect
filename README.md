@@ -29,10 +29,10 @@ aktiRBD\Scripts\activate
 ### Step 1.2: Clone the Repository
 Create a new folder for your experiments and download the codebase. 
 ```
-mkdir aktiRBD
-cd aktiRBD 
-git clone TODO.git  aktiRBD_codebase 
-cd <todo/tod> 
+mkdir aktiRBD_experiment
+cd aktiRBD_experiment 
+git clone git@github.com:db-2010/aktiRBD.git 
+cd aktiRBD
 ```
 
 ### Step 1.3: Install the Package

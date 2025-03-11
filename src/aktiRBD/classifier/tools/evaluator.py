@@ -54,7 +54,8 @@ class Evaluator:
                 train_data, valid_data, night_threshold, save_path_night)
             utils.dump_to_json(scores_night, save_path_night.joinpath('night_scores.json'))
 
-        self._evaluate_patient_level(valid_data, self.thresholds.get('night'), self.thresholds.get('patient'))
+        self._evaluate_patient_level(
+            valid_data, self.thresholds.get('night'), self.thresholds.get('patient'), self.output_patient_csv)
 
         plt.close('all')
         gc.collect()
