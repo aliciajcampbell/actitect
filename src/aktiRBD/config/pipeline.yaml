@@ -1,0 +1,132 @@
+random_state: 42
+
+model:
+  which: 'xgboost'
+  dummy: 'prior'
+  early_stopping:
+    early_stopping_rounds: 10
+    eval_metric: [ 'logloss' ]
+  bayes_params:
+    n_calls: 100
+    use_early_stopping: False
+    verbose: True
+
+data:
+  agg_level: 'night'
+  processing:
+    scaler:  'robust' # 'robust' # 'minmax', 'standard', 'robust' or 'none'
+    scaling_order: 'before_ranking' # 'before_ranking' or 'after_ranking'
+    use_smote: True
+
+  loader:
+    binary_mapping: {'HC': 0, 'RBD': 1}
+    feature_dir: './features/per_night'  # relative to patient_dir
+    aggregation: [ 'mean', 'std', 'skew', 'kurt', 'mad', 'iqr', '10th_percentile', '90th_percentile' ]
+    included_local_features: [
+      # modes
+      'mean_mag', 'std_mag', 'skew_mag', 'kurt_mag',
+      'mean_x', 'std_x', 'skew_x', 'kurt_x', 'mean_y', 'std_y', 'skew_y', 'kurt_y', 'mean_z', 'std_z', 'skew_z', 'kurt_z',
+      'min_mag', 'q25_mag', 'med_mag', 'q75_mag', 'max_mag',
+      'min_x', 'q25_x', 'med_x', 'q75_x', 'max_x',
+      'min_y', 'q25_y', 'med_y', 'q75_y', 'max_y',
+      'min_z', 'q25_z', 'med_z', 'q75_z', 'max_z',
+      # 'iqr_mag', 'iqr_x', 'iqr_y', 'iqr_z',
+
+      # energy
+      'sma_mag', 'power', 'rms_mag',
+
+      # spectral
+      'asd_1', 'asd_2', 'asd_4', 'asd_8', 'asd_16', 'f1', 'f2', 'f3', 'p1', 'p2', 'p3', 'sp_entropy', 'avg_sp_power',
+
+      # auto-correlation
+      'ac_first_max_mag', 'loc_first_max_mag', 'ac_first_min_mag', 'loc_first_min_mag', 'zeros_mag',
+      'ac_first_max_x', 'loc_first_max_x', 'ac_first_min_x', 'loc_first_min_x', 'zeros_x',
+      'ac_first_max_y', 'loc_first_max_y', 'ac_first_min_y', 'loc_first_min_y', 'zeros_y',
+      'ac_first_max_z', 'loc_first_max_z', 'ac_first_min_z', 'loc_first_min_z', 'zeros_z',
+
+      # peaks
+      'peaks_per_sec', 'avg_peak_prom', 'max_peak_prom', 'min_peak_prom',
+
+      # non-linear dynamics
+      'SampEn_mag', 'hurst_rs_mag', 'SampEn_x', 'hurst_rs_x', 'SampEn_y', 'hurst_rs_y', 'SampEn_z', 'hurst_rs_z',
+
+      # Poincaré
+      'sd1', 'sd2', 'sd_ratio', 'ellipse_area'
+    ]
+
+    included_global_features: [
+      # inter-event-intervals
+      'iei_mean_sec', 'iei_std_sec', 'iei_var_sec', 'iei_cv', 'iei_iqr_sec',
+
+      # degree of clustering
+      'hopkins_score', 'kde_n_peaks', 'kde_avg_prom', 'kde_max_prom', 'kde_min_prom',
+
+      # overall activity
+      'n_moves_per_h',
+
+      # duration modes
+      'mean_dur_sec', 'std_dur_sec', 'skew_dur_sec', 'kurt_dur_sec', 'q25_dur_sec', 'med_dur_sec', 'q75_dur_sec',
+
+      # sleep quality proxies
+      'sleep_eff', 'waso'
+    ]
+
+nested_cv:
+  n_repeats:  5
+  n_jobs: -1
+  outer_cv:
+    n_splits: 5
+    shuffle: True
+  inner_cv:
+    n_splits: 5
+    shuffle: True
+
+  n_interp_points_roc_pr:  100
+  n_interp_points_calibration: 11
+  calib_plot_hist_bin_width: .05
+  default_experiment:
+    name: 'nested_cv'
+    hp_setup_name:
+    early_stopping:
+    calibration:
+    threshold: 'roc_dist'
+    patient_aggregation: 'ensemble_major'
+
+  log_night_eval: false
+  load_path_cv_feature_rankings:  # leave empty for default
+
+
+
+final_model:
+    n_jobs: -1
+    bayes_cv:
+      n_splits: 5
+      shuffle: True
+    bayes_params: { 'n_calls': 100, 'use_early_stopping': False, 'verbose': True }
+    # 'early_stopping': {'early_stopping_rounds': 100, 'eval_metric': balanced_accuracy_eval},
+    early_stopping: { 'early_stopping_rounds': 10, 'eval_metric': [ 'logloss' ] }
+    load_path_feature_rankings: # leave empty for default!
+    log_night_level: false
+    output_patient_csv: false
+    experiments: # define experiment setups to try (note: test set is blinded, so choose one/two setups and only test once)
+      - name: 'model1'
+        hp_setup_name: 'bayes_opt'
+        early_stopping: true
+        calibration: 'sigmoid'
+        threshold: 'roc_dist'
+        patient_aggregation: 'ensemble_major'
+      - name: 'model2'
+        hp_setup_name: 'bayes_opt'
+        early_stopping: true
+        calibration: 'sigmoid'
+        threshold: 'default'
+        patient_aggregation: 'ensemble_major'
+
+    nested_cv_path: # leave empty for default!, otherwise must point to a nested_cv output dir.
+    include_pretrain_full: True # include mode where models are pretrained on concatenated cologne train+test cohort
+    save_path_models: # leave empty for default, can be a list for several locations
+    calibration_cv:  # cv used for calibrating the model (if specified)
+      n_splits: 5
+      shuffle: True
+    overwrite_final_repo_models: True  # if True, it will also save the models at aktiRBD.models.pretrained
+

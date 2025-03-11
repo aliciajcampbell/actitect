@@ -1,0 +1,6 @@
+[submodule "src/boruta_py"]
+	path = src/boruta_py
+	url = https://github.com/scikit-learn-contrib/boruta_py
+[submodule "src/pyclustertend"]
+	path = src/pyclustertend
+	url = git@github.com:lachhebo/pyclustertend.git
