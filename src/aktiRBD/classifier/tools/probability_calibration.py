@@ -28,7 +28,7 @@ class CustomCalibratedClassifierCV(CalibratedClassifierCV):
                          base_estimator=base_estimator)
         self.pass_fold_as_eval_set = pass_fold_as_eval_set  # added to enable early stopping.
 
-    # noinspection PyPep8Naming
+    # noinspection PyPep8Namin
     def fit(self, X, y, sample_weight=None, groups=None, **fit_params):
         """ Same as CalibratedClassifierCV.fit except we pass 'groups' into the CV."""
         check_classification_targets(y)
@@ -179,56 +179,3 @@ def draw_calibration_curve(y_train, y_prob_train, hist_bin_width=.025):
     ax2.tick_params(axis='both', which='minor', direction='in', length=4, width=1, top=True, left=True)
     ax2.set_title('probabilities', fontweight='bold', fontsize=12, pad=10)
     return fig, brier_score
-
-
-# Test section: Adding multiple classifiers
-if __name__ == '__main__':
-    import numpy as np
-    import matplotlib.pyplot as plt
-    from sklearn.datasets import make_classification
-    from sklearn.model_selection import GroupKFold
-    from sklearn.metrics import brier_score_loss
-    from xgboost import XGBClassifier
-
-    from aktiRBD_dev import utils
-
-    utils.setup_logging()
-
-    _X, _y = make_classification(
-        n_samples=2000, n_features=20, n_informative=10, random_state=42
-    )
-    # Example grouping: each sample i belongs to group i % 5
-    _groups = np.array([i % 5 for i in range(_X.shape[0])])
-
-    # Define a grouped CV splitter
-    group_kfold = GroupKFold(n_splits=5)
-
-    # Base XGBoost model with early stopping
-    xgb_clf = XGBClassifier(
-        n_estimators=200,
-        early_stopping_rounds=10,
-        use_label_encoder=False,
-        eval_metric="logloss",  # Required to suppress a warning
-        random_state=42
-    )
-
-    # Calibrated wrapper using grouped CV for calibration
-    cal_clf = CustomCalibratedClassifierCV(
-        estimator=xgb_clf,
-        method="sigmoid",
-        cv=group_kfold,
-        pass_fold_as_eval_set=True,
-        n_jobs=1
-    )
-
-    # Fit with groups
-    cal_clf.fit(_X, _y, groups=_groups, verbose=False)
-
-    # Evaluate calibration (just compute Brier score here for brevity)
-    y_prob = cal_clf.predict_proba(_X)[:, 1]
-    score = brier_score_loss(_y, y_prob)
-    print(f"Brier score (XGB + early stopping + grouped CV): {score:.4f}")
-    for i, calibrated_pair in enumerate(cal_clf.calibrated_classifiers_):
-        xgb_fold_estimator = calibrated_pair.estimator
-        print(f"Fold {i} best_iteration: {xgb_fold_estimator.best_iteration}")
-        print(f"Fold {i} n_epochs: {len(xgb_fold_estimator.get_booster().get_dump())}")

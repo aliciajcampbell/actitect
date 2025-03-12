@@ -9,7 +9,7 @@ import pandas as pd
 from scipy import stats
 from sklearn import metrics
 
-from aktiRBD_dev import utils
+from aktiRBD import utils
 
 __all__ = ['draw_actigraphy_data', 'draw_roc_or_pr_curve', 'draw_cv_roc_or_pr_curve', 'draw_cv_boxplot']
 
