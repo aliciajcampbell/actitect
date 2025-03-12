@@ -28,6 +28,7 @@ from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 __all__ = [
+    'get_experiment_root',
     'mute_matplotlib_logger',
     'setup_logging',
     'read_meta_csv_to_df',
@@ -64,6 +65,12 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 colorama_init(autoreset=True)
+
+
+def get_experiment_root():
+    _json = Path(__file__).parents[1].joinpath('config/experiment_root.json')
+    assert _json.is_file(), f"'{_json}' is not a file."
+    return Path(read_from_json(_json).get('EXPERIMENT_ROOT', 'none'))
 
 
 @contextmanager

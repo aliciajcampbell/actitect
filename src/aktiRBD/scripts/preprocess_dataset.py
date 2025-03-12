@@ -48,7 +48,7 @@ def _process_dataset(args: argparse.Namespace, processing_kwargs: dict, feature_
                     raise UserWarning(f"excluding {_patient_id} according to meta.")
                 else:
                     sleep_log = sleep_logs[sleep_logs['ID'] == _patient_id] \
-                        if args.create_plots and sleep_logs else None
+                        if args.create_plots and sleep_logs is not None else None
 
                     file_processor = FileProcessor(_patient_id, _diagnosis, file_path, save_dir,
                                                    save_processed_data=args.save_processed, sleep_log=sleep_log)
@@ -88,7 +88,7 @@ def _parse_args():
     # file organization arguments
     parser.add_argument(
         '-r', '--root_dir', type=str,
-        default=str(Path(__file__).resolve().parents[4]), # todo: this will be in site-packages not aktiRBD_experiment!
+        default=str(utils.get_experiment_root()),  # default points to aktiRBD_experiment
         help="The root directory containing 'data/' and 'aktiRBD/'."
     )
 

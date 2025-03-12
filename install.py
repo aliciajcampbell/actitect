@@ -2,12 +2,14 @@
 """ Installation helper script to a) ensure non-python dependency OpenMP is available and b) install the Python package.
 Optionally install in development mode using python install.py --dev"""
 
-import sys
+import argparse
+import ctypes
+import json
+import logging
 import os
 import subprocess
-import ctypes
-import logging
-import argparse
+import sys
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
@@ -80,6 +82,12 @@ def _ensure_openmp():
             logging.info("OpenMP runtime is now available after installation.")
 
 
+def _set_experiment_root():
+    _exp_root = Path(__file__).parents[1].resolve()
+    with open(Path(__file__).parent.joinpath('src/aktiRBD/config/experiment_root.json'), 'w') as f:
+        json.dump({"EXPERIMENT_ROOT": str(_exp_root)}, f, indent=4)
+
+
 def main():
     args = _parse_args()
 
@@ -91,7 +99,10 @@ def main():
     # 1: XGBoost depends on OpenMP runtime for multiprocessing, ensure it's available
     _ensure_openmp()
 
-    #  2: Install the Python package using pip.
+    # 2: Dynamically set the experiment root path
+    _set_experiment_root()
+
+    #  3: Install the Python package using pip.
     pip_command = ["pip", "install", "."]
     if args.dev:
         pip_command = ["pip", "install", "-e", ".[dev]"]

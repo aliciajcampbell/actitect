@@ -1,2 +1,3 @@
 recursive-include src/aktiRBD/config *.yaml
+recursive-include src/aktiRBD/config *.json
 recursive-include src/aktiRBD/models *.joblib

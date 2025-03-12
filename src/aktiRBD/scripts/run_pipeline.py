@@ -28,7 +28,7 @@ def _run_setup():
         group.add_argument('--predict', action='store_true', help='Only run inference, no testing.')
 
         # Additional arguments for options within modes
-        parser.add_argument('-r', '--root_dir', type=str, default=str(Path(__file__).resolve().parents[4]),
+        parser.add_argument('-r', '--root_dir', type=str, default=str(utils.get_experiment_root()),
                             help="The root directory containing 'data/' and 'aktiRBD/'.")
 
         parser.add_argument('-c', '--config_file', type=str,

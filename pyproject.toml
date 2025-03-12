@@ -76,7 +76,7 @@ package-dir = {"" = "src"}
 find = { where = ["src"] }
 
 [tool.setuptools.package-data]
-"aktiRBD" = ["config/*.yaml", "models/**/*.joblib"]
+"aktiRBD" = ["config/*.yaml", "config/*.json", "models/**/*.joblib"]
 
 [project.urls]
 Repository = "todo"
