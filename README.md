@@ -82,8 +82,8 @@ The default organization of the files is shown below. The binaries are simply li
 metafile should be stored at `./data/raw/meta/metadata.csv`. 
 If different file locations are necessary, see [Step 2.1: Data Pre-Processing](#step-21-data-pre-processing).
 ```
-aktiRBD/ (the main folder of your experiment)  
-  ├── akitRBD_codebase (the cloned repo)
+aktiRBD_experiment/ (the main folder of your experiment)  
+  ├── aktiRBD (the cloned repo)
   │     ├── README.md 
   │     ├── src/ 
   │     ├── ... 
@@ -103,8 +103,8 @@ aktiRBD/ (the main folder of your experiment)
 ```
 
 ### Step 2.1: Data Pre-Processing
-This step reads in the binary data, performs preprocessing (Uniform resampling, Butterworth bandpass filtering, 
-Auto-calibration, Non-wear detection, Sleep segmentation) and computes the nocturnal motion features for classification.
+This step reads in the binary data, performs preprocessing (uniform resampling, Butterworth bandpass filtering, 
+auto-calibration, non-wear detection, and sleep segmentation) and computes the nocturnal motion features for classification.
 If the files are located at the default positions as described above, you can simply run
 ```bash 
 aktiRBD-preprocess 
@@ -115,7 +115,7 @@ File organization:
  - **`-d, --data_dir`** <br> 
  **Description:** (str) The directory (relative to `root_dir`) that contains the raw actigraphy files. <br> 
  **Default:** `./data/raw/` <br> 
- **Note:** Overwrite if binary files should be located elsewhere.
+ **Note:** Only needed if binary files should be located outside the default directory. 
 - **`-m, --meta_file`** <br> 
  **Description:** (str) The path to the metadata CSV file, relative to `root_dir`. <br> 
  **Default:** `./data/raw/meta/metadata.csv`<br>
@@ -129,7 +129,8 @@ Operational Flags:
 - **`-ns, --no_store`** <br>
 **Description:** When provided, the script saves only the calculated features and not the processed data.<br>
 **Default:** False. <br>
-**Note:** Processed data is stored as `.parquet` file and uses ~2GB for a 7d recording at 100Hz.
+**Note:** If flag is not activated,  the processed actigraphy data is stored as `.parquet` file. 
+(~2GB for a 7d recording at 100Hz.)
 - **`-cp, --create_plots`** <br>
 **Description:** Whether to create plots of the raw and processed actigraphy data.<br>
 **Default:** True. <br>
