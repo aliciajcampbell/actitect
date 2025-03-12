@@ -44,7 +44,7 @@ dependencies = [
 
   # time series
   "nolds==0.5.2",  # non-linear dynamics features
-  "pyhrv==0.4.1",   # poincare features
+  "pyhrv==0.4.1",   # poincare features -> triggers Spectrum issues on windows
   "biosppy>2.0.0,<2.2.3",  # depedency of pyhrv, with 2.2.3 peakutils missing
 
   # i/o
@@ -74,6 +74,9 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages]
 find = { where = ["src"] }
+
+[tool.setuptools.package-data]
+"aktiRBD" = ["config/*.yaml", "models/**/*.joblib"]
 
 [project.urls]
 Repository = "todo"

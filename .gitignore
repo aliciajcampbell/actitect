@@ -16,4 +16,5 @@
 **/.DS_Store
 
 /src/aktiRBD/scripts/notebooks/.ipynb_checkpoints/
+/build/
 .idea/

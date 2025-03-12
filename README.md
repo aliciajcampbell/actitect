@@ -50,7 +50,7 @@ after this , the output should look like
 
 ---
 ## 2. Usage
-The code is modular and has two entry points: i) `aktiRBD-process` as a standalone tool for actigraphy data processing 
+The code is modular and has two entry points: i) `aktiRBD-preprocess` as a standalone tool for actigraphy data processing 
 and ii) `aktiRBD-analysis` for RBD prediction using the extracted nocturnal motion features. 
 ### Step 2.0: File Organization
 To run the code, you need the raw actigraphy files and a `metadata.csv` file. 
