@@ -25,13 +25,6 @@ def _process_dataset(args: argparse.Namespace, processing_kwargs: dict, feature_
         raise UserWarning(f"No actigraphy files found at {_data_dir}")
     save_dir = utils.check_make_dir(Path(args.root_dir).joinpath(args.out_dir), use_existing=True)
 
-    try:
-        sleep_logs = utils.standardize_sleep_diary(pd.read_excel(
-            _data_dir.joinpath('meta/RBD_HC-RBD_Bettzeiten_20240117_fixed.xlsx'))) if args.create_plots else None
-    except FileNotFoundError:
-        sleep_logs = None
-        logger.warning(f"no sleep log file found.")
-
     _excluded = {}
     with utils.custom_tqdm(total=len(_raw_files), position=0, leave=True) as pbar:
         for i, file_path in enumerate(_raw_files):
@@ -42,39 +35,42 @@ def _process_dataset(args: argparse.Namespace, processing_kwargs: dict, feature_
                     raise UserWarning(f"missing or double entry in 'data/raw/meta/metadata.csv' for {file_path},"
                                       f" fix and try again")
                 _meta = _meta.iloc[0].to_dict()
-                _patient_id, _diagnosis = _meta.get('ID') or 'none', _meta.get('diagnosis') or 'none'
+                _patient_id = _meta.get('ID') or 'none'
+                _record_ID = str(_meta.get('record_ID')).strip() \
+                    if pd.notna(_meta.get('record_ID')) else "none"
+                _diagnosis = _meta.get('diagnosis') or 'none'
+                _rec_label = f"{_patient_id} ({_record_ID})" \
+                    if _record_ID and _record_ID != "none" else _patient_id
                 if _meta['exclude'] == 1:
-                    _excluded.update({_patient_id: "meta"})
-                    raise UserWarning(f"excluding {_patient_id} according to meta.")
+                    _excluded.update({f"{_rec_label}": "meta"})
+                    raise UserWarning(f"excluding {_rec_label} according to meta.")
                 else:
-                    sleep_log = sleep_logs[sleep_logs['ID'] == _patient_id] \
-                        if args.create_plots and sleep_logs is not None else None
 
-                    file_processor = FileProcessor(_patient_id, _diagnosis, file_path, save_dir,
-                                                   save_processed_data=args.save_processed, sleep_log=sleep_log)
+                    file_processor = FileProcessor(_patient_id, _record_ID, _diagnosis, file_path, save_dir,
+                                                   save_processed_data=args.save_processed)
                     file_processor.process(feature_kwargs, processing_kwargs, args, pbar)
                     del file_processor
                     gc.collect()
 
             except NotImplementedError as _ne:
-                logger.warning(f" NotImplementError {_ne} encountered in process_single_file({_patient_id})."
+                logger.warning(f" NotImplementError {_ne} encountered in process_single_file({_rec_label})."
                                f" Might be caused by unknown 'feature_mode' variable: "
                                f"Got '{feature_kwargs['feature_mode']}, currently implemented: 'per_night'")
-                logger.warning(f" Excluded: {_patient_id}")
-                _excluded.update({_patient_id: f"{_ne}"})
+                logger.warning(f" Excluded: {_rec_label}")
+                _excluded.update({_rec_label: f"{_ne}"})
             except UserWarning as _uw:
-                logger.warning(f" UserWarning {_uw} encountered in process_single_file({_patient_id}).")
-                logger.warning(f" Excluded: {_patient_id}")
-                _excluded.update({_patient_id: f"{_uw}"})
+                logger.warning(f" UserWarning {_uw} encountered in process_single_file({_rec_label}).")
+                logger.warning(f" Excluded: {_rec_label}")
+                _excluded.update({_rec_label: f"{_uw}"})
             except Exception as e:
-                logger.warning(f" Exception {e} encountered in process_single_file({_patient_id}).")
-                logger.warning(f" Excluded: {_patient_id}")
-                _excluded.update({_patient_id: f"{e}"})
+                logger.warning(f" Exception {e} encountered in process_single_file({_rec_label}).")
+                logger.warning(f" Excluded: {_rec_label}")
+                _excluded.update({_rec_label: f"{e}"})
                 traceback.print_exc()
             pbar.update(1)
 
-        logger.info(f"\n ...processing finished. Excluded: {_excluded} -> n_included={len(_raw_files)}-{len(_excluded)}"
-                    f"={len(_raw_files) - len(_excluded)}")
+        logger.info(f"\n ...processing finished. Excluded: {_excluded} ({len(_excluded)}) "
+                    f"-> n_processed={len(_raw_files) - len(_excluded)}")
 
 
 def _parse_args():
@@ -147,7 +143,6 @@ def _parse_args():
 
 
 def main():
-
     args = _parse_args()
     log_path = utils.check_make_dir(Path(args.root_dir).joinpath(f"{args.data_dir}/logs/"), True)
     utils.setup_logging(log_file_path=log_path.joinpath('preprocess.log'))

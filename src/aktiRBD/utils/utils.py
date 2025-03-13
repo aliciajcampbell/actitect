@@ -158,6 +158,7 @@ def read_meta_csv_to_df(path_to_csv: Path):
     if '#' in meta_df.columns:
         meta_df.set_index('#', inplace=True)
 
+    # format timestamps if needed
     if 'timestamps' in meta_df.columns:
         meta_df['timestamps'] = meta_df['timestamps'].apply(
             lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
@@ -165,7 +166,40 @@ def read_meta_csv_to_df(path_to_csv: Path):
     filtered_cols = [_col for _col in meta_df.columns if 'Unnamed' not in _col]
     meta_df = meta_df[filtered_cols]
 
-    return meta_df.map(lambda x: x.strip() if isinstance(x, str) else x)
+    # strip whitespaces in strings if present
+    meta_df = meta_df.map(lambda x: x.strip() if isinstance(x, str) else x)
+
+    # ensure required columns exist:
+    required_cols = {'filename', 'ID'}
+    missing_cols = required_cols - set(meta_df.columns)
+    if missing_cols:
+        raise ValueError(f"Metadata file is missing required columns: {missing_cols}")
+    if 'record_ID' not in meta_df.columns:
+        meta_df['record_ID'] = None
+
+    # drop last row if it is a summary row
+    if pd.to_numeric(meta_df.iloc[-1]['filename'], errors='coerce') is not None:
+        meta_df = meta_df.iloc[:-1].copy()
+
+    def _assign_record_ID(group: pd.DataFrame, ID_value: str):
+        """ Assigns unique recording IDs for patients with multiple recordings.
+        Preserves user-defined values where present. """
+        group.insert(group.columns.get_loc('filename') + 1, 'ID', ID_value)
+        if group.shape[0] == 1:
+            return group  # only one recording for ID, no change needed
+        if group['record_ID'].isna().all():  # multiple recordings but no user-define record_IDs
+            group['record_ID'] = [f"rec{i + 1}" for i in range(group.shape[0])]  # auto-complete record_IDs
+        elif group['record_ID'].isna().any():  # some exist, but not all
+            logger.warning(f"`record_ID` values are only partially defined for ID={ID_value}."
+                           f" Using auto-completion for missing values. ")
+            existing_ids = set(group['record_ID'].dropna())  # keep defined IDs
+            new_ids = [f"rec{i + 1}" for i in range(1, group.shape[0] + 1) if f"rec{i + 1}" not in existing_ids]
+            group.loc[group['record_ID'].isna(), 'record_ID'] = new_ids[:group['record_ID'].isna().sum()]
+
+        return group
+
+    return meta_df.groupby('ID', group_keys=False).apply(
+        lambda g: _assign_record_ID(g, g.name), include_groups=False)
 
 
 def load_yaml_file(path):

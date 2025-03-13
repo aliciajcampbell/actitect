@@ -37,7 +37,8 @@ def _run_setup():
 
         parser.add_argument('-d', '--processed_data_dir', type=str,
                             default='./data/processed/',  # rel. to root dir
-                            help='directory (rel. to root) containing the pre-processed data.')
+                            help='directory (rel. to root) containing the pre-processed data.'
+                                 'Each patient may have subdirectories for multiple recordings.')
 
         parser.add_argument('-m', '--meta_file', type=str,
                             default='./data/raw/meta/metadata.csv',  # rel. to root dir

@@ -63,17 +63,21 @@ Supported formats for actigraphy binaries are
 The `metadata.csv` file should have one row per subject/record and contain at least the columns 
 - ***filename:*** the filename of the actigraphy data.
 - ***ID:*** a random identifier for the subject the data is taken from.
+- ***record_ID:*** if you have multiple recordings for the same subject, they are processed independently and you can 
+use record_ID to assign an identifier to each. E.g. 'left' and 'right' if you have recordings from the both arms.
+If one subject (=ID), has multiple records but no entries in record_ID, they will automatically be named rec1, rec2, ... etc. 
 - ***diagnosis:*** a string indicating the cohort group of the subject, 
 e.g. 'RBD' for RBD diagnosed subject and 'HC' for neg.
-- ***train/test:*** should be set to 'test' for external data.
+- ***train/test:*** should be set to 'test'. (todo: allow to leave empty: implement predict method without eval)
 - ***exclude:*** can be used to exclude certain subject from the analysis by setting it to '1', otherwise empty.
 
-| #   | filename               | ID     | diagnosis | train/test | exclude |
-|-----|------------------------|--------|-----------|------------|---------|
-| 1   | \<name1>.<cwa/bin/csv> | <ID-1> | RBD       | test       |         |
-| 2   | \<name2>.<cwa/bin/csv> | <ID-2> | RBD       | test       | 1       |
-| 3   | \<name3>.<cwa/bin/csv> | <ID-3> | HC        | test       |         |
-| ... | ...                    | ...    | ...       | ...        | ...     |
+| #   | filename               | ID     | record_ID | diagnosis | train/test | exclude |
+|-----|------------------------|--------|-----------|-----------|------------|---------|
+| 1   | \<name1>.<cwa/bin/csv> | <ID-1> |           | RBD       | test       |         |
+| 2   | \<name2>.<cwa/bin/csv> | <ID-2> |           | RBD       | test       | 1       |
+| 3   | \<name3>.<cwa/bin/csv> | <ID-3> | left      | HC        | test       |         |
+| 3   | \<name4>.<cwa/bin/csv> | <ID-3> | right     | HC        | test       |         |
+| ... | ...                    | ...    | ...       | ...       | ...        |
 
 **Note:** if the user is only interested in the preprocessing part of the pipeline, the columns ***diagnosis*** and 
 ***train/test*** are irrelevant and can be left empty. 

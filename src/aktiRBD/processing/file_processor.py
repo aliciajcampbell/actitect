@@ -29,18 +29,20 @@ __all__ = ['FileProcessor']
 class FileProcessor:
     _delete_confirmation_given = False  # only relevant for 'delete_processed_files' operational modes
 
-    def __init__(self, patient_id: str, label: str, acti_file_path: Path, save_dir: Path, save_processed_data: bool,
-                 sleep_log: pd.DataFrame = None):
+    def __init__(self, patient_id: str, record_id: str, label: str, acti_file_path: Path, save_dir: Path,
+                 save_processed_data: bool, sleep_log: pd.DataFrame = None):
 
         self.patient_id = patient_id
+        self.record_id = record_id if record_id and record_id != 'none' else None
+        self.saving_suffix = self.patient_id if not self.record_id else f"{self.patient_id}_{self.record_id}"
         self.label = label
         self.acti_file_path = acti_file_path
-        self.save_dir = save_dir
         self.save_processed_data = save_processed_data
         self.sleep_log = sleep_log
 
-        self.patient_save_path = save_dir.joinpath(f"{patient_id}/")
-        self.parquet_path = self.patient_save_path.joinpath(f"df-{patient_id}.parquet")
+        self.recording_save_dir = save_dir.joinpath(patient_id) if not self.record_id \
+            else save_dir.joinpath(patient_id, self.record_id)
+        self.parquet_path = self.recording_save_dir.joinpath(f"df-{self.saving_suffix}.parquet")
         self.info, self.process_kwargs, self.feat_kwargs, self.pbar = None, None, None, None
 
     def process(self, feat_kwargs: dict, process_kwargs: dict, operational_kwargs: Namespace, pbar=None):
@@ -62,7 +64,7 @@ class FileProcessor:
         if self.pbar:
             self.pbar.set_description(f"[PROGRESS]: Processing files")
             self.pbar.set_postfix({
-                "file": f"{self.patient_id}",
+                "file": f"{self.saving_suffix}",
                 "save_processed": operational_kwargs.save_processed,
                 "create_plots": operational_kwargs.create_plots,
                 "redo_processing": operational_kwargs.redo_processing,
@@ -78,26 +80,26 @@ class FileProcessor:
         # 1. apply processing if needed
         processed_df, self.info = self._load_or_process_data(operational_kwargs.redo_processing)
         assert self.info['processing']['all_steps_successful'] is True, \
-            f"Incomplete pre-processing detected, excluding {self.patient_id} ..."
+            f"Incomplete pre-processing detected, excluding {self.saving_suffix} ..."
 
         # 2. feature calculation (if specified)
         if not operational_kwargs.skip_feature_calc:
             if self.pbar:
-                self.pbar.set_postfix({"file": f"{self.patient_id}", "status": "extr. movements"})
+                self.pbar.set_postfix({"file": f"{self.saving_suffix}", "status": "extr. movements"})
             selected_nights, move_bout_mask, move_bout_ids = self._segment_nocturnal_movements(processed_df)
             local_feat_df, global_feat_df = self._calculate_features(
                 processed_df, selected_nights, move_bout_mask, move_bout_ids)
 
-            _feat_dir = utils.check_make_dir(self.patient_save_path.joinpath(f"features/{self.feat_kwargs['mode']}/"))
-            global_feat_df.to_csv(_feat_dir.joinpath(f"global-features-{self.patient_id}.csv"))
-            local_feat_df.to_csv(_feat_dir.joinpath(f"local-features-{self.patient_id}.csv"))
-            utils.dump_to_json(self.info, self.patient_save_path.joinpath(f"info-{self.patient_id}.json"))
-            logger.info(f"(io: {self.patient_id}): features successfully saved")
+            _feat_dir = utils.check_make_dir(self.recording_save_dir.joinpath(f"features/{self.feat_kwargs['mode']}/"))
+            global_feat_df.to_csv(_feat_dir.joinpath(f"global-features-{self.saving_suffix}.csv"))
+            local_feat_df.to_csv(_feat_dir.joinpath(f"local-features-{self.saving_suffix}.csv"))
+            utils.dump_to_json(self.info, self.recording_save_dir.joinpath(f"info-{self.saving_suffix}.json"))
+            logger.info(f"(io: {self.saving_suffix}): features successfully saved")
 
             # cleanup memory
             del local_feat_df, global_feat_df, selected_nights
         else:
-            logger.info(f"(io: {self.patient_id}): Skipping feature extraction."
+            logger.info(f"(io: {self.saving_suffix}): Skipping feature extraction."
                         f" ('args.skip_feature_calc'={operational_kwargs.skip_feature_calc})")
 
         # 3. plotting (if specified)
@@ -118,25 +120,25 @@ class FileProcessor:
             FileProcessor._delete_confirmation_given = True
 
         if not self.has_been_processed:  # check if files exists in the first place
-            logger.warning(f"Processed file for patient {self.patient_id} does not exist. Skipping deletion.")
+            logger.warning(f"Processed file for patient {self.saving_suffix} does not exist. Skipping deletion.")
             return  # Nothing to delete
 
         # define and scan for derived files that should exist(feature files and plots)
-        feature_dir = self.patient_save_path.joinpath("features")
-        raw_plot_path = self.parquet_path.parent.joinpath(f"{self.patient_id}-raw.png")
-        processed_plot_path = self.parquet_path.parent.joinpath(f"{self.patient_id}-processed.png")
+        feature_dir = self.recording_save_dir.joinpath("features")
+        raw_plot_path = self.parquet_path.parent.joinpath(f"{self.saving_suffix}-raw.png")
+        processed_plot_path = self.parquet_path.parent.joinpath(f"{self.saving_suffix}-processed.png")
         # search for feature files within all subdirectories of 'features/'
-        global_feature_files = list(feature_dir.rglob(f"global-features-{self.patient_id}.csv"))
-        local_feature_files = list(feature_dir.rglob(f"local-features-{self.patient_id}.csv"))
+        global_feature_files = list(feature_dir.rglob(f"global-features-{self.saving_suffix}.csv"))
+        local_feature_files = list(feature_dir.rglob(f"local-features-{self.saving_suffix}.csv"))
         required_files = global_feature_files + local_feature_files + [raw_plot_path, processed_plot_path]
 
         missing_files = [str(file) for file in required_files if not file.exists()]
         if not missing_files:
             try:
                 self.parquet_path.unlink()
-                logger.warning(f"({self.patient_id}) deleted processed data .parquet file {self.parquet_path}.")
+                logger.warning(f"({self.saving_suffix}) deleted processed data .parquet file {self.parquet_path}.")
             except Exception as e:
-                logger.error(f"({self.patient_id}) failed to delete {self.parquet_path}: {e}")
+                logger.error(f"({self.saving_suffix}) failed to delete {self.parquet_path}: {e}")
         else:
             logger.warning(f"cannot delete {self.parquet_path} as the following derived files are missing:"
                            f" {missing_files}. Skipping deletion.")
@@ -146,30 +148,30 @@ class FileProcessor:
         return self.parquet_path.exists()  # simply checks if the processed file exists
 
     def _load_info(self):
-        with open(self.patient_save_path.joinpath(f"info-{self.patient_id}.json"), 'r') as f:
+        with open(self.recording_save_dir.joinpath(f"info-{self.saving_suffix}.json"), 'r') as f:
             return json.load(f)
 
     def _load_or_process_data(self, redo_processing: bool):
         if self.has_been_processed and not redo_processing:  # file exist and we do not want to force re-processing
             processed_df = parquet.read_table(self.parquet_path).to_pandas()
-            with open(self.patient_save_path.joinpath(f"info-{self.patient_id}.json"), 'r') as f:
+            with open(self.recording_save_dir.joinpath(f"info-{self.saving_suffix}.json"), 'r') as f:
                 info = json.load(f)
-            logger.info(f"(io: {self.patient_id}): using archived pre-processed .parquet file.")
+            logger.info(f"(io: {self.saving_suffix}): using archived pre-processed .parquet file.")
 
         else:  # otherwise, run processing from raw data
             if self.has_been_processed and redo_processing:
-                logger.warning(f"(io: {self.patient_id}): processed data exists as .parquet file but will"
+                logger.warning(f"(io: {self.saving_suffix}): processed data exists as .parquet file but will"
                                f" re-run processing due to operational args. Data will be overwritten "
                                f"if 'save_processed_data' is True ({self.save_processed_data}).")
-            actimeter = ActimeterFactory(self.acti_file_path, self.patient_id)
-            utils.check_make_dir(self.patient_save_path, use_existing=True)
+            actimeter = ActimeterFactory(self.acti_file_path, self.saving_suffix)
+            utils.check_make_dir(self.recording_save_dir, use_existing=True)
             processed_df = actimeter.process(**self.process_kwargs)
 
             info = {'meta': actimeter.meta, 'header': actimeter.binary_header, 'processing': actimeter.processing_info}
             if self.save_processed_data:
                 parquet.write_table(pyarrow.Table.from_pandas(processed_df), self.parquet_path, compression='snappy')
-                utils.dump_to_json(info, self.patient_save_path.joinpath(f"info-{self.patient_id}.json"))
-                logger.info(f"(io: {self.patient_id}): pre-processed DataFrame saved to .parquet file")
+                utils.dump_to_json(info, self.recording_save_dir.joinpath(f"info-{self.saving_suffix}.json"))
+                logger.info(f"(io: {self.saving_suffix}): pre-processed DataFrame saved to .parquet file")
             del actimeter
 
         return processed_df, info
@@ -194,14 +196,14 @@ class FileProcessor:
             axis=1)
         selected_sptws = sptws[sptws.selected].reset_index().rename(columns={'index': 'sptw_idx'})
         selected_sptws.index.name = 'night'
-        logger.info(f"({self.patient_id}) found {selected_sptws.shape[0]} full nights of sleep in data.")
+        logger.info(f"({self.saving_suffix}) found {selected_sptws.shape[0]} full nights of sleep in data.")
 
         # mask the movement bouts:
         move_segment_mask, move_segment_ids, move_stats = pr.segment_nocturnal_movements(processed_df, selected_sptws)
 
         # update some infos about selected nights and number of movements:
         logger.info(
-            f"({self.patient_id}) movement segmentation done: n_moves={len(move_segment_ids)} across all nights.")
+            f"({self.saving_suffix}) movement segmentation done: n_moves={len(move_segment_ids)} across all nights.")
 
         self.info['processing']['sleep_movements'].update({f"n_moves_total": len(move_segment_ids)})
         self.info['processing']['sleep_movements'].update(move_stats)
@@ -222,7 +224,7 @@ class FileProcessor:
         for night_idx, night_sptw in _selected_nights.iterrows():  # loop over nights
             if self.pbar:
                 self.pbar.set_postfix(
-                    {"file": f"{self.patient_id}", "night": f"{night_idx + 1}/{_selected_nights.shape[0]}"})
+                    {"file": f"{self.saving_suffix}", "night": f"{night_idx + 1}/{_selected_nights.shape[0]}"})
 
             # select the subset of the data corresponding to the night
             night_df = _processed_df[(_processed_df.index >= night_sptw['start_time'])
@@ -234,7 +236,7 @@ class FileProcessor:
             self.info['processing']['sleep_movements'].update({f"n_moves_night_{night_idx}": len(move_bout_ids_night)})
 
             if not len(move_bout_ids_night) > 10:
-                logger.warning(f"not enough movement episodes found in {self.patient_id} night {night_idx}"
+                logger.warning(f"not enough movement episodes found in {self.saving_suffix} night {night_idx}"
                                f" (n={len(move_bout_ids_night)}). Check for non-wear.")
 
             else:
@@ -260,7 +262,7 @@ class FileProcessor:
                                                             feat_names)
                     local_feat_df = pd.concat([local_feat_df, pd.DataFrame(local_feats, index=[idx]).astype(object)])
                     if self.pbar:
-                        self.pbar.set_postfix({"file": f"{self.patient_id}",
+                        self.pbar.set_postfix({"file": f"{self.saving_suffix}",
                                                "night": f" {night_idx + 1}/{_selected_nights.shape[0]} ",
                                                "features": f"{np.round((idx / len(move_bout_ids_night)) * 100, 1)}%"})
                     del local_feats
@@ -293,15 +295,16 @@ class FileProcessor:
 
             if isinstance(calc_global_move_features.cluster_fig, plt.Figure):
                 _cluster_dir = utils.check_make_dir(
-                    self.patient_save_path.joinpath(f"move_clusters/"), True, verbose=False)
+                    self.recording_save_dir.joinpath(f"move_clusters/"), True, verbose=False)
                 calc_global_move_features.cluster_fig.savefig(
-                    _cluster_dir.joinpath(f"clusters-{self.patient_id}-night{_night_idx}.png"), bbox_inches='tight')
+                    _cluster_dir.joinpath(f"clusters-{self.saving_suffix}-night{_night_idx}.png"), bbox_inches='tight')
 
         sptw_duration = _night_sptw['length(h)']
         sleep_duration = (_night_df.index.to_series().diff()[_night_df['sleep_bout']] / pd.Timedelta(hours=1)).sum()
         _global_feats['sleep_eff'] = sleep_duration / sptw_duration
         _global_feats['waso'] = sptw_duration / sleep_duration
         _global_feats['id'] = self.patient_id
+        _global_feats['record_id'] = self.record_id if self.record_id else 'none'
         _global_feats['diagnosis'] = self.label
         _global_feats['start_time'] = _night_sptw['start_time']
         _global_feats['end_time'] = _night_sptw['end_time']
@@ -327,6 +330,7 @@ class FileProcessor:
                 _local_feats = _feature_generator.calc_features(_move_bout_df)
 
         _local_feats['id'] = self.patient_id
+        _local_feats['record_id'] = self.record_id if self.record_id else 'none'
         _local_feats['diagnosis'] = self.label
         _local_feats['time_start'] = _move_bout_df.index[0]
         _local_feats['time_end'] = _move_bout_df.index[-1]
@@ -344,18 +348,18 @@ class FileProcessor:
         def _save_plot(fig, path, data_type):
             """Helper function to save a plot and log status."""
             if path.exists():
-                logger.info(f"(io: {self.patient_id}): {data_type} plot exists and will be overwritten.")
+                logger.info(f"(io: {self.saving_suffix}): {data_type} plot exists and will be overwritten.")
             fig.savefig(path, bbox_inches='tight')
             plt.close(fig)
             del fig
             gc.collect()
 
         # Define paths
-        raw_plot_path = self.parquet_path.parent.joinpath(f"{self.patient_id}-raw.png")
-        processed_plot_path = self.parquet_path.parent.joinpath(f"{self.patient_id}-processed.png")
+        raw_plot_path = self.parquet_path.parent.joinpath(f"{self.saving_suffix}-raw.png")
+        processed_plot_path = self.parquet_path.parent.joinpath(f"{self.saving_suffix}-processed.png")
 
         # Plot raw data
-        raw_df = ActimeterFactory(self.acti_file_path, self.patient_id).load_raw_data()
+        raw_df = ActimeterFactory(self.acti_file_path, self.saving_suffix).load_raw_data()
         fig_raw = draw_actigraphy_data(raw_df, self.sleep_log, raw_only=True)
         _save_plot(fig_raw, raw_plot_path, "raw")
 
