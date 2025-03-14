@@ -99,7 +99,7 @@ def cluster_features(move_segments, kde_kwargs: dict, peak_kwargs: dict, n_sampl
         return cluster_feats, (kde, mmp_scaled, density_x.flatten(), density_y.flatten(), valid_peaks)
 
     else:
-        return cluster_feats
+        return cluster_feats, None
 
 
 def n_moves_per_time(move_segments: pd.DataFrame):

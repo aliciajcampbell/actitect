@@ -220,6 +220,8 @@ class FileProcessor:
 
     def _calculate_features(self, _processed_df: pd.DataFrame, _selected_nights: pd.DataFrame,
                             _move_bout_mask: pd.DataFrame, _move_bout_ids: pd.DataFrame):
+
+        sample_rate = self._get_final_sample_rate()
         local_feat_df, global_feat_df = pd.DataFrame(), pd.DataFrame()
         for night_idx, night_sptw in _selected_nights.iterrows():  # loop over nights
             if self.pbar:
@@ -247,7 +249,7 @@ class FileProcessor:
                     gc.collect()
 
                 # calculate local (per-move) features:
-                feat_names = CalcLocalMoveFeatures(self.feat_kwargs['mode']).get_feature_names()  # exec. once only
+                feat_names = CalcLocalMoveFeatures(self.feat_kwargs['mode'], sample_rate).get_feature_names()
                 for idx, relevant_idx in enumerate(move_bout_ids_night):  # loop over movement bouts
 
                     move_bout_df = night_df[move_bout_mask_night == relevant_idx]
@@ -258,8 +260,8 @@ class FileProcessor:
                                        f"\n - mask: {move_bout_mask_night}"
                                        f"\n - episode: {move_bout_df}")
 
-                    local_feats = self._calc_local_features(move_bout_df, relevant_idx, night_sptw, night_idx,
-                                                            feat_names)
+                    local_feats = self._calc_local_features(
+                        move_bout_df, relevant_idx, night_sptw, night_idx, feat_names, sample_rate)
                     local_feat_df = pd.concat([local_feat_df, pd.DataFrame(local_feats, index=[idx]).astype(object)])
                     if self.pbar:
                         self.pbar.set_postfix({"file": f"{self.saving_suffix}",
@@ -317,7 +319,7 @@ class FileProcessor:
         return _global_feats
 
     def _calc_local_features(self, _move_bout_df: pd.DataFrame, _relevant_idx: int, _night_sptw: pd.DataFrame,
-                             _night_idx: int, _feature_names: np.ndarray):
+                             _night_idx: int, _feature_names: np.ndarray, sample_rate: float):
 
         with utils.Timer() as local_timer:
             if not (MIN_LOCAL_SAMPLE_LENGTH <= _move_bout_df.shape[0] <= MAX_LOCAL_SAMPLE_LENGTH):
@@ -326,7 +328,7 @@ class FileProcessor:
                     f"({(_move_bout_df.index[-1] - _move_bout_df.index[0]).total_seconds():.3f}s)")
                 _local_feats = {_feat_name: np.NaN for _feat_name in _feature_names}
             else:  # calculate the movement features of each episode
-                _feature_generator = CalcLocalMoveFeatures(self.feat_kwargs['mode'])
+                _feature_generator = CalcLocalMoveFeatures(self.feat_kwargs['mode'], sample_rate)
                 _local_feats = _feature_generator.calc_features(_move_bout_df)
 
         _local_feats['id'] = self.patient_id
@@ -341,6 +343,58 @@ class FileProcessor:
         _local_feats['night'] = _night_idx
         _local_feats['runtime'] = local_timer()
         return _local_feats
+
+    def _get_final_sample_rate(self) -> float:
+        """ Retrieves the final sample rate from either the device header or the processing info.
+        Raises a ValueError if neither provides a valid numeric sample rate.
+        If both are available and differ, a warning is logged.
+        Assumes that self.info has already been populated.
+
+        Returns:
+            A numeric sample rate (float).
+        """
+        assert self.info is not None, \
+            "self.info is not defined. Ensure data has been processed before calling this method."
+
+        # try to access header sample rate if defined
+        header_fs = self.info.get('header', {}).get('sample_rate')
+        header_fs = self._validate_sample_rate_type(header_fs, self.saving_suffix) if header_fs else None
+
+        # try to access the data sampling rate (either with or without resampling)
+        data_fs = self.info['processing']['resampling'].get(
+            'resample_fs_mean', self.info['processing']['resampling'].get('raw_fs_mean'))
+        data_fs = self._validate_sample_rate_type(data_fs, self.saving_suffix) if data_fs else None
+
+        # check if both are undefined
+        if header_fs is None and data_fs is None:
+            raise ValueError(f"(io: {self.saving_suffix}) No valid sample rate found in header or processing info.")
+        # if one is undefined, use the defined one
+        if header_fs is None:
+            return data_fs
+        elif data_fs is None:
+            return header_fs
+        else:  # both defined: warn if they differ and use data_fs
+            if header_fs != data_fs:
+                logger.warning(f"(io: {self.saving_suffix}) Device header sample rate ({header_fs} Hz) "
+                    f"differs from data sample rate ({data_fs} Hz)."
+                               f" Consider activating resampling in the processing pipeline.")
+            return data_fs
+
+    @staticmethod
+    def _validate_sample_rate_type(sample_rate, log_suffix: str):
+        if isinstance(sample_rate, str):
+            try:
+                sample_rate = float(sample_rate)
+            except ValueError:
+                logger.warning(f"(io: {log_suffix}) sample rate '{sample_rate}' cannot be converted to float.")
+                return None
+            return sample_rate
+        elif isinstance(sample_rate, (float, int)):
+            return sample_rate
+        else:
+            logger.warning(
+                f"(io: {log_suffix}) sample rate '{sample_rate}' has invalid dtype: {type(sample_rate).__name__}")
+            return None
 
     def _plot_data(self, processed_df: pd.DataFrame):
         """Plots raw and processed data, saving the plots to disk."""

@@ -156,6 +156,22 @@ class BaseDevice(ABC):
         _raw_fs = self.processing_info['resampling']['raw_fs_mean']
         target_fs = (np.floor(_raw_fs / 10) * 10 if _raw_fs % 10 < 5 else np.ceil(_raw_fs / 10) * 10) \
             if _resample_rate == 'infer' else _resample_rate  # if 'infer', take closest fs%10=0
+        header_fs = self.binary_header.get('sample_rate')
+        if isinstance(header_fs, str):
+            try:
+                header_fs = float(header_fs)
+            except ValueError:
+                logger.warning(f"(resampling: {self.meta['patient_id']}) '"
+                               f"header_fs' is stored as str but cannot be converted to float: '{header_fs}'")
+                target_fs = None
+
+        if header_fs is not None and isinstance(target_fs, (float, int)):
+            threshold = .1 * header_fs  # threshold as 10% of header sample rate
+            if abs(header_fs - target_fs) > threshold:
+                logger.warning(f"(resampling: {self.meta['patient_id']}) Device header sample_rate={header_fs:.2f} "
+                               f"Hz differs significantly from target_fs={target_fs:.2f} Hz. Likely due to significant "
+                               f"non-wear periods in data. Falling back to header sample rate.")
+                target_fs = header_fs
 
         _apply_resampling = False
         if not _raw_fs_is_uniform:  # check if raw data has uniform fs
