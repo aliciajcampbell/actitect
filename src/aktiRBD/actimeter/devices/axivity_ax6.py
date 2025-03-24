@@ -23,7 +23,7 @@ class AxivityAx6(BaseDevice):
     def __str__(self):
         return f"AxivityAx6(patient_ID='{self.meta['patient_id']}')"
 
-    def _parse_binary_to_df(self, ax6_logging_threshold_d: int = 8):
+    def _parse_binary_to_df(self, ax6_logging_threshold_d: int = 8, header_only: bool = False):
         """ Parse the binary file and return it as pd.Dataframe.
         Parameters:
             :param ax6_logging_threshold_d: (int, Optional) If not None, use the 'LoggingStartTime' value from
@@ -37,14 +37,15 @@ class AxivityAx6(BaseDevice):
                     f" loading from {self.processing_info['loading']['filepath']}")
         with CwaData(self.processing_info['loading']['filepath'], include_time=True, include_accel=True, verbose=False,
                      **self.kwargs) as cwa_data:
-            df = cwa_data.get_samples(use_datetime64=True)
             header = cwa_data.header
+            df = cwa_data.get_samples(use_datetime64=True) if not header_only else None
 
-        df.rename(columns={'accel_x': 'x', 'accel_y': 'y', 'accel_z': 'z'}, inplace=True)
-        df.set_index('time', inplace=True)
         header['sample_rate'] = header.pop('sampleRate')
+        if not header_only:
+            df.rename(columns={'accel_x': 'x', 'accel_y': 'y', 'accel_z': 'z'}, inplace=True)
+            df.set_index('time', inplace=True)
 
-        if ax6_logging_threshold_d and header.get('loggingStartTime'):
+        if ax6_logging_threshold_d and header.get('loggingStartTime') and not header_only:
             logging_start_time = pd.to_datetime(header.get('loggingStartTime'), errors='coerce')
             if logging_start_time is not pd.NaT:
                 data_span_days = (df.index[-1] - df.index[0]).total_seconds() / (24 * 60 * 60)
@@ -53,7 +54,7 @@ class AxivityAx6(BaseDevice):
                     logger.info(f"(io: {self.meta['patient_id']}) using 'loggingStartTime'"
                                 f" ({pd.Timestamp(header['loggingStartTime'])}) to trim raw data.")
         else:
-            if ax6_logging_threshold_d:
+            if ax6_logging_threshold_d and not header_only:
                 logger.warning(f"(io: {self.meta['patient_id']}) 'loggingStartTime' not found in header;"
                                f" cannot apply logging start time cutoff.")
 

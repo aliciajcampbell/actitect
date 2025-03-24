@@ -71,13 +71,13 @@ e.g. 'RBD' for RBD diagnosed subject and 'HC' for neg.
 - ***train/test:*** should be set to 'test'. (todo: allow to leave empty: implement predict method without eval)
 - ***exclude:*** can be used to exclude certain subject from the analysis by setting it to '1', otherwise empty.
 
-| #   | filename               | ID     | record_ID | diagnosis | train/test | exclude |
-|-----|------------------------|--------|-----------|-----------|------------|---------|
-| 1   | \<name1>.<cwa/bin/csv> | <ID-1> |           | RBD       | test       |         |
-| 2   | \<name2>.<cwa/bin/csv> | <ID-2> |           | RBD       | test       | 1       |
-| 3   | \<name3>.<cwa/bin/csv> | <ID-3> | left      | HC        | test       |         |
-| 3   | \<name4>.<cwa/bin/csv> | <ID-3> | right     | HC        | test       |         |
-| ... | ...                    | ...    | ...       | ...       | ...        |
+| #   | filename                 | ID       | record_ID | diagnosis | train/test | exclude |
+|-----|--------------------------|----------|-----------|-----------|------------|---------|
+| 1   | `<name1>.<cwa/bin/csv>`  | `<ID-1>` |           | `RBD`     | `test`     |         |
+| 2   | `<name2>.<cwa/bin/csv>`  | `<ID-2>` |           | `RBD`     | `test`     | `1`     |
+| 3   | `<name3a>.<cwa/bin/csv>` | `<ID-3>` | `left`    | `HC`      | `test`     |         |
+| 3   | `<name3b>.<cwa/bin/csv>` | `<ID-3>` | `right`   | `HC`      | `test`     |         |
+| ... | ...                      | ...      | ...       | ...       | ...        |
 
 **Note:** if the user is only interested in the preprocessing part of the pipeline, the columns ***diagnosis*** and 
 ***train/test*** are irrelevant and can be left empty. 

@@ -29,6 +29,7 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 
 __all__ = [
     'get_experiment_root',
+    'detect_csv_delimiter',
     'mute_matplotlib_logger',
     'setup_logging',
     'read_meta_csv_to_df',
@@ -138,21 +139,22 @@ def custom_tqdm(total, position=0, leave=True, disable=False, color=Fore.MAGENTA
 
 # i/o related:
 
-def read_meta_csv_to_df(path_to_csv: Path):
-    def _detect_delimiter(file_path):
-        with open(file_path, 'r', newline='', encoding='utf-8') as file:
-            sample = file.read(1024)
-            sniffer = csv.Sniffer()
-            try:
-                dialect = sniffer.sniff(sample)
-                if dialect.delimiter not in [';', ',', '\t', '|']:  # restrict to common delimiters
-                    raise ValueError(f"unexpected delimiter: {dialect.delimiter}")
-                return dialect.delimiter
-            except Exception as e:
-                logger.warning(f"failed to detect delimiter: {e}. Defaulting to ';'")
-                return ';'
+def detect_csv_delimiter(file_path):
+    with open(file_path, 'r', newline='', encoding='utf-8') as file:
+        sample = file.read(1024)
+        sniffer = csv.Sniffer()
+        try:
+            dialect = sniffer.sniff(sample)
+            if dialect.delimiter not in [';', ',', '\t', '|']:  # restrict to common delimiters
+                raise ValueError(f"unexpected delimiter: {dialect.delimiter}")
+            return dialect.delimiter
+        except Exception as e:
+            logger.warning(f"failed to detect delimiter: {e}. Defaulting to ';'")
+            return ';'
 
-    delimiter = _detect_delimiter(path_to_csv)
+
+def read_meta_csv_to_df(path_to_csv: Path):
+    delimiter = detect_csv_delimiter(path_to_csv)
     meta_df = pd.read_csv(path_to_csv, delimiter=delimiter)
     meta_df.columns = meta_df.columns.str.strip()
     if '#' in meta_df.columns:

@@ -70,29 +70,35 @@ class BaseDevice(ABC):
                                 'sleep_nonwear_ambiguities': {}, 'sleep_movements': {}}
         self.resolve_nw_params = resolve_nw_params if resolve_nw_params is not None else ResolveNwSleepParams()
 
-    def load_raw_data(self, resolve_duplicates: bool = True):
+    def load_raw_data(self, resolve_duplicates: bool = True, header_only: bool = False):
         """ Wrapper for the binary parser. Loads the raw data into time-indexed pd.DataFrame.
         Parameters:
             :param resolve_duplicates: (bool) whether to check and resolve duplicate time indices.
+            :param header_only: (bool) if True, will only load the header from the binary, not the data.
         Returns:
             :return:  (pd.Dataframe): the raw data with columns 'x,'y', and 'z' (in units of g) """
         try:
             with utils.Timer() as load_timer:
-                raw_df, header = self._parse_binary_to_df()
-                processing.assert_valid_df(raw_df)
-                if resolve_duplicates:
-                    _info_for_print = {'patient_id': self.meta['patient_id'], 'sample_rate': header['sample_rate']}
-                    raw_df = processing.handle_duplicate_timestamps(raw_df, remove_dupes=True, **_info_for_print)
-                _is_uniform, _mean_fs, _std_fs = processing.infer_mean_sample_rate(raw_df)
+                raw_df, header = self._parse_binary_to_df(header_only=header_only)
+                if not header_only:
+                    processing.assert_valid_df(raw_df)
+                    if resolve_duplicates:
+                        _info_for_print = {'patient_id': self.meta['patient_id'], 'sample_rate': header['sample_rate']}
+                        raw_df = processing.handle_duplicate_timestamps(raw_df, remove_dupes=True, **_info_for_print)
+                    _is_uniform, _mean_fs, _std_fs = processing.infer_mean_sample_rate(raw_df)
 
-            self.meta['raw_data_loaded'] = True
-            self.raw_df, self.binary_header = raw_df, header
-            self.processing_info['loading']['time(s)'] = load_timer()
-            self.processing_info['resampling'].update({'raw_fs_is_uniform': _is_uniform, 'raw_fs_mean': _mean_fs,
-                                                       'raw_fs_std': _std_fs, 'raw_num_ticks': raw_df.shape[0]})
+            if not header_only:
+                self.meta['raw_data_loaded'] = True
+                self.raw_df, self.binary_header = raw_df, header
+                self.processing_info['loading']['time(s)'] = load_timer()
+                self.processing_info['resampling'].update({'raw_fs_is_uniform': _is_uniform, 'raw_fs_mean': _mean_fs,
+                                                           'raw_fs_std': _std_fs, 'raw_num_ticks': raw_df.shape[0]})
 
-            logger.info(f"(io: {self.meta['patient_id']}) successfully loaded raw data ({load_timer()}s)")
-            return raw_df
+                logger.info(f"(io: {self.meta['patient_id']}) successfully loaded raw data ({load_timer()}s)")
+                return raw_df
+            else:
+                logger.info(f"(io: {self.meta['patient_id']}) successfully loaded data header (raw data not loaded!)")
+                return header
         except Exception as e:
             raise UserWarning(f"Failed to load raw data: {e}")
 
