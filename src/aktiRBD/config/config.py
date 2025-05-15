@@ -5,7 +5,7 @@ from typing import Type, TypeVar, Any, Dict, List, Union
 import yaml
 
 __all__ = ['PipelineConfig', 'ModelConfig', 'DataConfig', 'NestedCVConfig',
-           'FinalModelConfig', 'ExternalTestConfig', 'ExperimentConfig']
+           'FinalModelConfig', 'ExternalTestConfig', 'ExperimentConfig', 'LoaderConfig']
 
 
 @dataclass

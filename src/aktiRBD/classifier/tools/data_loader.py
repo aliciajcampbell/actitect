@@ -90,14 +90,15 @@ class DataLoader:
                 self.test_id_map = feat_df_night[test_index_mask].id.to_numpy()
 
             elif agg_level == 'patient':
-                logger.warning(f"'patient' feature aggregation is deprecated and not recommended for usage.")
                 _included_local_features = [
                     f"{_feat}_{postfix}" for postfix in self.aggregation for _feat in self.included_local_features
                 ]
                 feat_df_patient = (
                     feat_df_night
-                    .groupby(['id'])[_included_local_features + self.included_global_features + ['ground_truth']]
-                    .agg('mean')  # huge entropy
+                    .groupby(['id'])
+                    [[*_included_local_features, *self.included_global_features, 'ground_truth']]
+                    .agg('mean')  # numeric columns only, large entropy
+                    .join(feat_df_night.groupby('id')[['record_key', 'record_id']].agg('first'))  # take first string/id
                     .reset_index()
                 )
                 _feature_df = feat_df_patient[_included_local_features + self.included_global_features]
@@ -105,7 +106,7 @@ class DataLoader:
                 feat_map = _feature_df.columns.values
                 x = _feature_df.to_numpy()
                 y = feat_df_patient.ground_truth
-                test_index_mask = feat_df_patient.recor_key.isin(self.records_train)
+                test_index_mask = feat_df_patient.record_key.isin(self.records_train)
                 train_index_mask = feat_df_patient.id.isin(self.records_test)
                 self.train_id_map = feat_df_patient[train_index_mask].id.to_numpy()
                 self.test_id_map = feat_df_patient[test_index_mask].id.to_numpy()
@@ -301,9 +302,13 @@ class DataLoader:
                 _df = _df.loc[:, ~_df.columns.str.contains('Unnamed')]  # drop all columns with 'Unnamed' (old indices)
                 _df['ident'] = filename
                 if not _df.empty:
+                    _record_id_missing = 'record_id' not in _df.columns
+                    if _record_id_missing:
+                        _df['record_id'] = None
+
                     _df = _df[self.included_local_features + util_cols]
                     _df['record_id'] = _df['record_id'].astype(str).str.strip()
-                    _df['record_id'] = _df['record_id'].replace(['none', 'NaN', 'nan'], None)
+                    _df['record_id'] = _df['record_id'].replace(['none', 'NaN', 'nan', 'None'], None)
                     _df['record_key'] = _df.apply(lambda row: row['id'] if row['record_id'] is None \
                         else f"{row['id']}_{row['record_id']}", axis=1)
                     _li.append(_df)

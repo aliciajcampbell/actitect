@@ -16,7 +16,7 @@ from skopt.space import Integer, Real, Categorical
 from aktiRBD import utils
 from aktiRBD.classifier.models import model_factory
 from aktiRBD.classifier.tools import BayesianOptCV
-from aktiRBD.classifier.tools.classification_threshold import ClassThreshold, get_night_and_patient_threshold
+from aktiRBD.classifier.tools.classification_threshold import get_night_and_patient_threshold
 from aktiRBD.classifier.tools.evaluator import Evaluator
 from aktiRBD.classifier.tools.feature_set import FeatureSet
 from aktiRBD.classifier.tools.probability_calibration import CustomCalibratedClassifierCV

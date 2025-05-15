@@ -78,7 +78,7 @@ def model_factory(model_name: str, cls_balance: float, seed: int, top_k_min: int
                 # default: 1, control balance of pos./neg. weights for unbal. data ref: n_neg/n_pos
             },
             bayesian_param_space=common_bayes_param_space + [
-                # TODO: it's a large search space, reduce DOF
+                # TODO: reduce DOF
                 Integer(name='n_estimators', low=10, high=1_000, prior='uniform'),
                 Integer(name='max_depth', low=1, high=14, prior='uniform'),
                 Real(name='reg_alpha', low=0, high=10, prior='uniform'),

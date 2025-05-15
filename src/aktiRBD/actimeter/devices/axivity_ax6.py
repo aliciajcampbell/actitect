@@ -30,11 +30,11 @@ class AxivityAx6(BaseDevice):
                 the binary header to trim the data. Useful if device was switched on to early and data has several
                 days of non-wear before data taking. Only is applied if the data spans longer then
                 'ax6_logging_threshold_d' days. The default is set to 8 but might be adjusted for longer data-taking.
+            :param header_only: (bool, Optional) If True, only the binary header is returned. Default is False.
         Returns:
             :return: (pd.DataFrame) the raw data parsed as DataFrame.
         """
-        logger.info(f"(io: {self.meta['patient_id']})"
-                    f" loading from {self.processing_info['loading']['filepath']}")
+        logger.info(f"(io: {self.meta['patient_id']}) loading from '{self.processing_info['loading']['filepath']}'.")
         with CwaData(self.processing_info['loading']['filepath'], include_time=True, include_accel=True, verbose=False,
                      **self.kwargs) as cwa_data:
             header = cwa_data.header

@@ -94,13 +94,14 @@ class BaseDevice(ABC):
                 self.processing_info['resampling'].update({'raw_fs_is_uniform': _is_uniform, 'raw_fs_mean': _mean_fs,
                                                            'raw_fs_std': _std_fs, 'raw_num_ticks': raw_df.shape[0]})
 
-                logger.info(f"(io: {self.meta['patient_id']}) successfully loaded raw data ({load_timer()}s)")
+                logger.info(f"(io: {self.meta['patient_id']}) successfully loaded raw data. ({load_timer()}s)")
                 return raw_df
             else:
                 logger.info(f"(io: {self.meta['patient_id']}) successfully loaded data header (raw data not loaded!)")
                 return header
         except Exception as e:
-            raise UserWarning(f"Failed to load raw data: {e}")
+            error_message = f"{type(e).__name__}: {e}"
+            raise UserWarning(f"(io: {self.meta['patient_id']}) Failed to load raw data: {error_message}")
 
     def process(self, resample_rate: Union[int, str] = 'infer', lowpass_hz: float = None, highpass_hz: float = None,
                 skip_calibration: bool = False):

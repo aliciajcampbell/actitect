@@ -18,9 +18,8 @@ logger = logging.getLogger(__name__)
 class GENEActiv(BaseDevice):
     """ Subclass of BaseDevice representing GENEActive actimeters. Implements the logic to read binary data from hex-16
     format to decimal. Uses parallel processing to parse multiple pages in parallel for significant speedup.
-    Binary de-coding according to encoding described in GENEActive manual:
-    https://activinsights.com/wp-content/uploads/2022/06/GENEActiv-Instructions-for-Use-v1_31Mar2022.pdf
-    """
+    Binary decoding according to encoding described in GENEActive manual:
+    https://activinsights.com/wp-content/uploads/2022/06/GENEActiv-Instructions-for-Use-v1_31Mar2022.pdf. """
 
     def __init__(self, path_to_bin: Path, patient_id: str, n_jobs_parser: int = -1, kwargs: dict = None):
         super().__init__(filepath=path_to_bin, patient_id=patient_id)
@@ -38,15 +37,14 @@ class GENEActiv(BaseDevice):
                                              'incl_light': False, 'incl_battery': False, 'incl_temperature': False,
                                              'incl_button': False}
         self.skipped_pages, self.failed_pages = [], []
-        self.mfr_gain, self.mfr_offset = None, None
-        self.light_lux, self.light_volts = None, None
+        self.mfr_gain, self.mfr_offset = None, None  # manufacture gain and offsets
+        self.light_lux, self.light_volts = None, None  # gain and offset for light data
 
     def __str__(self):
         return f"GENEActiv(patient_ID='{self.meta['patient_id']}')"
 
-    def _parse_binary_to_df(self, resolve_duplicates=True):
-        logger.info(f"(io: {self.meta['patient_id']})"
-                    f" loading from {self.processing_info['loading']['filepath']}")
+    def _parse_binary_to_df(self, resolve_duplicates=True, header_only: bool = False):
+        logger.info(f"(io: {self.meta['patient_id']}) loading from '{self.processing_info['loading']['filepath']}'.")
         try:
             with open(self.processing_info['loading']['filepath'], 'rb') as f:
                 file_content = f.read()
@@ -61,14 +59,16 @@ class GENEActiv(BaseDevice):
             if self.kwargs.get('incl_light'):  # make light sensor calibration available for parser
                 _cali_data = header.get('calibration_data', {})
                 self.light_lux, self.light_volts = _cali_data.get('lux'), _cali_data.get('volts')
+            if not header_only:
+                pages = self._identify_data_pages(file_content[_data_start_index:])  # identify data recording pages
+                assert len(pages) == header['memory_status']['number_of_pages'], \
+                    (f"Number of extracted pages ({len(pages)}) does not match "
+                     f"expected number from file header ({header['memory_status']['number_of_pages']}).")
 
-            pages = self._identify_data_pages(file_content[_data_start_index:])  # identify data recording pages
-            assert len(pages) == header['memory_status']['number_of_pages'], \
-                (f"Number of extracted pages ({len(pages)}) does not match "
-                 f"expected number from file header ({header['memory_status']['number_of_pages']}).")
-
-            df = self._parse_pages_in_parallel(pages)  # process the pages in parallel
-            df.set_index('time', inplace=True)
+                df = self._parse_pages_in_parallel(pages)  # process the pages in parallel
+                df.set_index('time', inplace=True)
+            else:
+                df = pd.DataFrame()
             self.status_ok = 1
             header['sample_rate'] = header['configuration_info'].pop('measurement_frequency')
             return df, header
@@ -76,6 +76,7 @@ class GENEActiv(BaseDevice):
         except Exception as e:
             logger.error(f"Exception occurred: {e}")
             self.status_ok = 0
+            return None
 
     def _parse_bin_file_header(self, content):
         """ Parse the header to extract metadata and get data recording start index."""
@@ -96,6 +97,7 @@ class GENEActiv(BaseDevice):
     @staticmethod
     def _extrct_header_section_data(full_content: str, section_pattern: str):
         """ for each header section, return values as dict. """
+
         def _format_value(value):
             """Remove null characters, strip extra whitespace, and converts number strings to float."""
             value = value.replace('\x00', '').strip()
@@ -255,7 +257,9 @@ class GENEActiv(BaseDevice):
         except ValueError as e:
             raise ValueError(f"Error converting hex to int: {e}")
 
-        if self.kwargs.get('calibrate_with_gain_and_offset'):  # calibrate the raw values
+        # calibrate the raw values
+        if (self.kwargs.get('calibrate_with_gain_and_offset')
+                and self.mfr_gain is not None and self.mfr_offset is not None):
             x = (x_raw * 100.0 - self.mfr_offset[0]) / self.mfr_gain[0]
             y = (y_raw * 100.0 - self.mfr_offset[1]) / self.mfr_gain[1]
             z = (z_raw * 100.0 - self.mfr_offset[2]) / self.mfr_gain[2]
@@ -306,15 +310,15 @@ class GENEActiv(BaseDevice):
                 return timestamp
             except ValueError:
                 continue
-        raise ValueError(f"Invalid time format: {time_str}")
+        raise ValueError(f'Invalid time format: {time_str}')
 
     @staticmethod
     def _12bit_hex_to_decimal(hex_str: str, mode: str = 'xyz'):
-        """ Convert the 12 bit hex value (3 hex chars) to decimal based on different modes.
+        """ Convert the 12-bit hex value (3 hex chars) to decimal based on different modes.
         Parameters:
             :param hex_str: (str) the str of 3 hex chars to convert.
-            :param mode: (str, Optional) 'xyz' for full signed 12 bits, i.e. ±2048 (default),
-             'light' for unsigned first 10 bits (0-1024) and 'button' for second last bit (0/1).
+            :param mode: (str, Optional) 'xyz' for full signed 12 bits, i.e., ±2048 (default),
+             'light' for the unsigned first 10 bits (0-1024) and 'button' for the second last bit (0/1).
         Returns:
             :return: the decimal value. """
         value = int(hex_str, 16)  # convert hex to int

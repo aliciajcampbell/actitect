@@ -61,6 +61,7 @@ __all__ = [
     'nested_dict_iterator',
     'trim_whitespace_df',
     'list_subdirectories',
+    'compute_pearson_ci',
     'compute_mean_std_ci'
 ]
 
@@ -141,7 +142,7 @@ def custom_tqdm(total, position=0, leave=True, disable=False, color=Fore.MAGENTA
 
 def detect_csv_delimiter(file_path):
     with open(file_path, 'r', newline='', encoding='utf-8') as file:
-        sample = file.read(1024)
+        sample = file.read(2048)
         sniffer = csv.Sniffer()
         try:
             dialect = sniffer.sniff(sample)
@@ -153,7 +154,7 @@ def detect_csv_delimiter(file_path):
             return ';'
 
 
-def read_meta_csv_to_df(path_to_csv: Path):
+def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False):
     delimiter = detect_csv_delimiter(path_to_csv)
     meta_df = pd.read_csv(path_to_csv, delimiter=delimiter)
     meta_df.columns = meta_df.columns.str.strip()
@@ -171,6 +172,13 @@ def read_meta_csv_to_df(path_to_csv: Path):
     # strip whitespaces in strings if present
     meta_df = meta_df.map(lambda x: x.strip() if isinstance(x, str) else x)
 
+    # optionally exclude rows
+    if exclude and 'exclude' in meta_df.columns:
+        excluded_rows = meta_df[meta_df['exclude'] == 1]
+        dropped_ids = excluded_rows['ID'].tolist()
+        logger.info(f"Dropping {len(excluded_rows)} row(s) with exclude == 1. IDs: {dropped_ids}")
+        meta_df = meta_df[meta_df['exclude'] != 1]
+
     # ensure required columns exist:
     required_cols = {'filename', 'ID'}
     missing_cols = required_cols - set(meta_df.columns)
@@ -179,8 +187,11 @@ def read_meta_csv_to_df(path_to_csv: Path):
     if 'record_ID' not in meta_df.columns:
         meta_df['record_ID'] = None
 
-    # drop last row if it is a summary row
-    if pd.to_numeric(meta_df.iloc[-1]['filename'], errors='coerce') is not None:
+    # drop last row if it is a summary row (simply check if last row contains a valid filename or not)
+    def __row_has_valid_filename(row):
+        from aktiRBD.actimeter import SUPPORTED_FILETYPES
+        return any(str(row['filename']).endswith(ext) for ext in SUPPORTED_FILETYPES)
+    if not __row_has_valid_filename(meta_df.iloc[-1]):
         meta_df = meta_df.iloc[:-1].copy()
 
     def _assign_record_ID(group: pd.DataFrame, ID_value: str):
@@ -544,8 +555,7 @@ def read_from_json(file_path):
 
 
 def independent_stat_significance_test(distribution_a: np.ndarray, distribution_b: np.ndarray, names=('a', 'b')):
-    """
-    Quantify the difference between two distributions. Assumes independence of both variables
+    """Quantify the difference between two distributions. Assumes independence of both variables
 
     Parameters:
         :param distribution_a: (np.ndarray) of shape (n_samples_a,) representing the distribution A.
@@ -783,6 +793,19 @@ def list_subdirectories(base_path: Path, depth: int, stop_names: set = None):
     _traverse(base_path, 0)
     # Convert the absolute paths in result to paths relative to base_path.
     return [p.relative_to(base_path) for p in result]
+
+
+def compute_pearson_ci(r: float, n: int, confidence_level: float = .95):
+    """Compute confidence interval for Pearson correlation using Fisher z-transform."""
+    assert n >= 10, f" must have at least 10 samples to estimate Fisher z-transform, got {n}."
+
+    z = np.arctanh(r)  # Fisher z-transform
+    se = 1 / np.sqrt(n - 3)  # standard error
+    std_r = (1 - r ** 2) / np.sqrt(n - 3)  # estimation using delta method
+    z_crit = stats.norm.ppf((1 + confidence_level) / 2)
+    z_ci_lower = z - z_crit * se
+    z_ci_upper = z + z_crit * se
+    return np.tanh(z_ci_lower), np.tanh(z_ci_upper), std_r
 
 
 def compute_mean_std_ci(data: np.ndarray, confidence_level: float):

@@ -57,8 +57,18 @@ To run the code, you need the raw actigraphy files and a `metadata.csv` file.
 Supported formats for actigraphy binaries are
 - **Axivity AX6:** `.cwa`
 - **GENEActiv:** `.bin`
-- **Actiwatch:** `.bin` (todo)
-- **Unspecific:** `.csv` (todo)
+- **ActiGraph:** `.gt3x` 
+- **Generic:** `.csv` 
+
+**Note**: If your device is not natively supported, you can still load data by exporting it to `.csv` format first.
+The files must contain a column `time` that lists the sampling timestamps in `ISO8601 (%Y-%m-%dT%H:%M:%S.%f%z)` 
+format and columns `x, y, z` in units of g:
+```
+time,x,y,z
+2023-07-03 15:00:03.699,0.5947265625,0.15283203125,0.742431640625
+2023-07-03 15:00:03.707763,0.59033203125,0.16357421875,0.74609375
+2023-07-03 15:00:03.715652,0.6279296875,0.136474609375,0.73046875
+```
 
 The `metadata.csv` file should have one row per subject/record and contain at least the columns 
 - ***filename:*** the filename of the actigraphy data.

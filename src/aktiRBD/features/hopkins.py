@@ -10,13 +10,10 @@ __all__ = ['Hopkins']
 class Hopkins:
 
     def __init__(self, data: Union[np.ndarray, pd.DataFrame], n_samples: int, random_state: Optional[int] = 42) -> float:
-        """
-        Adapted with slight changes from https://github.com/lachhebo/pyclustertend to allow calculations for 1d data.
-
+        """Adapted with slight changes from https://github.com/lachhebo/pyclustertend to allow calculations for 1d data.
         Assess the clusterability of a dataset as a score between 0 and 1 by evaluating similarity to a uniform
          distribution. A score around 0.5 expresses no clusterability and a score tending to 0 express a high
          cluster tendency.
-
         Parameters:
             :param data: (np.ndarray/pd.DataFrame) Input data of shape (samples, dim), where dim can be 1 or greater.
             :param n_samples: (int) How many samples to use for the reference uniform dataset. Must be smaller than
@@ -24,8 +21,7 @@ class Hopkins:
             :param random_state: (int or None, default=42) Random seed for reproducibility. If None, the global random state is used.
 
         Returns:
-            :return: (float) The hopkins statistic score between 0 and 1.
-        """
+            :return: (float) The hopkins statistic score between 0 and 1."""
         self.score = None
 
         if isinstance(data, np.ndarray):
@@ -39,13 +35,13 @@ class Hopkins:
         dataset_samples = data.sample(n=n_samples, random_state=rng)
 
         # calculate the distances to nearest neighbors (NNs) in input data:
-        nn_distances_data = self.calc_nn_distances(data, dataset_samples)
+        nn_distances_data = self._calc_nn_distances(data, dataset_samples)
 
         # create uniform reference data with same variation:
-        uniform_reference_data = self.generate_uniform_reference_data(data, n_samples, rng)
+        uniform_reference_data = self._generate_uniform_reference_data(data, n_samples, rng)
 
         # calculate the nn distance between input and reference dataset
-        nn_distances_data_to_ref = self.nn_distances_data_to_ref(data, uniform_reference_data)
+        nn_distances_data_to_ref = self._nn_distances_data_to_ref(data, uniform_reference_data)
 
         x = sum(nn_distances_data)
         y = sum(nn_distances_data_to_ref)
@@ -57,13 +53,13 @@ class Hopkins:
             self.score = x / (x + y)[0]
 
     @staticmethod
-    def calc_nn_distances(df: pd.DataFrame, data_frame_sample: pd.DataFrame) -> np.ndarray:
+    def _calc_nn_distances(df: pd.DataFrame, data_frame_sample: pd.DataFrame) -> np.ndarray:
         tree = BallTree(df, leaf_size=2)
         dist, _ = tree.query(data_frame_sample, k=2)
         return dist[:, 1]
 
     @staticmethod
-    def generate_uniform_reference_data(df: pd.DataFrame, n_samples: int, rng: np.random.Generator) -> pd.DataFrame:
+    def _generate_uniform_reference_data(df: pd.DataFrame, n_samples: int, rng: np.random.Generator) -> pd.DataFrame:
         max_data_frame, min_data_frame = df.max(), df.min()
         _reference_data = None
 
@@ -77,7 +73,7 @@ class Hopkins:
         return pd.DataFrame(_reference_data)
 
     @staticmethod
-    def nn_distances_data_to_ref(data_df: pd.DataFrame, reference_df: pd.DataFrame) -> np.ndarray:
+    def _nn_distances_data_to_ref(data_df: pd.DataFrame, reference_df: pd.DataFrame) -> np.ndarray:
         tree = BallTree(data_df, leaf_size=2)
         dist, _ = tree.query(reference_df, k=1)
         return dist

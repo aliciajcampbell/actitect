@@ -1,6 +1,7 @@
 *.csv
 *.xlsx
 *.cwa
+*.gt3x
 *.pdf
 *.png
 *.tar

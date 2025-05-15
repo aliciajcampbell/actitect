@@ -82,7 +82,7 @@ class Evaluator:
             _eval_params.update({'n_interp_points_roc_pr': self.cv_config.n_interp_points_roc_pr})
         _ = eval_roc_and_pr_curves(valid_data.y, valid_data.prob, lvl='night', mode='eval', eval_params=_eval_params)
 
-        if not self.cv_mode:  # additionally, log an ingo json about misclassified nights per patient
+        if not self.cv_mode:  # additionally, log an info json about misclassified nights per patient
             if valid_data is not None:
                 # log info about N of misclassified nights for each patient
                 utils.dump_to_json(data_dict=self._analyze_misclassified_nights_per_patient(

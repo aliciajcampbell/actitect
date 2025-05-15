@@ -203,7 +203,7 @@ def draw_roc_or_pr_curve(x: np.ndarray, y: np.ndarray, thres: np.ndarray, mode: 
     return fig
 
 
-def draw_cv_roc_or_pr_curve(curve_dict: dict[list], mode: str, cl=.90,  display_op_point: bool = False):
+def draw_cv_roc_or_pr_curve(curve_dict: dict[list], mode: str, cl: float = .90, display_op_point: bool = False):
     if mode == 'roc':
         x, y = np.array(curve_dict['fpr']), np.array(curve_dict['tpr'])
         metric, op_point = np.array(curve_dict['auc']), np.array(curve_dict['op_point'])
@@ -223,8 +223,7 @@ def draw_cv_roc_or_pr_curve(curve_dict: dict[list], mode: str, cl=.90,  display_
     fig.set_facecolor('none')
     plt.subplots_adjust(left=.17, right=.97, top=.95, bottom=.14)
     ax.set_xlim(-.045, 1.045)
-    ax.tick_params(axis='both', which='major', direction='in', length=6, width=2, top=True, right=True,
-                   labelsize=15)
+    ax.tick_params(axis='both', which='major', direction='in', length=6, width=2, top=True, right=True, labelsize=15)
     ax.minorticks_on()
     ax.tick_params(axis='both', which='minor', direction='in', length=4, width=1, top=True, right=True)
 
@@ -269,7 +268,7 @@ def draw_cv_roc_or_pr_curve(curve_dict: dict[list], mode: str, cl=.90,  display_
     return fig
 
 
-def draw_cv_boxplot(history: dict, ylims=(.5, 1)):
+def draw_cv_boxplot(history: dict, ylims=(.5, 1), cl: float = .90):
     names, data = [], []
     for name, _data in history.items():
         if name == 'balanced_accuracy':
@@ -307,12 +306,13 @@ def draw_cv_boxplot(history: dict, ylims=(.5, 1)):
         median.set_color(median_color)
         median.set_linewidth(1.5)
 
-    means = [np.mean(d) for d in data]
-    stds = [np.std(d) for d in data]
     _y_offset = .05
-    for i, (mean, std) in enumerate(zip(means, stds)):
+    for i, (_name, _data) in enumerate(zip(names, data)):
         lower_whisker = bplot['whiskers'][2 * i].get_ydata()[1]
-        _label = '\n'.join(names[i].split()) + f'\n{mean:.2f}±{std:.2f}'
+        mean, std, ci_lower, ci_upper, _ = utils.compute_mean_std_ci(_data, confidence_level=cl)
+        _label = '\n'.join(names[i].split()) + '\n' \
+                 + r'$' + f'{mean:.2f}^{{+{ci_upper - mean:.2f}}}_{{-{mean - ci_lower:.2f}}}' + r'$' \
+                 + '\n' + r'$\sigma = ' + f'{std:.2f}' + r'$'
         ax.text(i + 1, lower_whisker - _y_offset, _label, ha='center', va='top', fontsize=15, color='k')
 
     ax.tick_params(axis='both', which='major', direction='in', length=6, width=2, top=True, right=True,
