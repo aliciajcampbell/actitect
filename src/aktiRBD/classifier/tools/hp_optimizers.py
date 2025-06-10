@@ -20,7 +20,7 @@ class BaseGridSearchCV(ABC):
     Evaluates each grid point with stratified group k-fold cross-validation.
 
     Parameters:
-        :param model: a classifier  with a .fit(), .set_params() and .predict() method.
+        :param model: a classifier with a .fit(), .set_params() and .predict() method.
         :param param_space: (dict) defining the range of values for each HP.
         :param fixed_params: (dict) of fixed HP that are not included in the search but needed for the .
         :param n_points: (int) sets the number of grid points in case of random sampling.
@@ -131,6 +131,7 @@ class RandomGridSearchCV(BaseGridSearchCV):
 
 
 class BayesianOptCV:
+    # todo: refactor for readability.
     def __init__(self, model_setup: ModelSetup, feat_rank_map: dict, seed: int):
         self.model = model_setup.model()
         self.fixed_params = model_setup.bayesian_fixed_params
@@ -151,38 +152,27 @@ class BayesianOptCV:
         assert len(_inv_params) == 0, f"not all argument names are valid for {self.model} API. not valid: {_inv_params}"
 
     @staticmethod
-    def _objective(_x, _y, _model, _params, _fixed_params, _cv_params, _score_weights, _use_early_stopping,
+    def _objective(_x, _y, _y_strat,  _model, _params, _fixed_params, _cv_params, _score_weights, _use_early_stopping,
                    _seed, _n_jobs):
         _params.update(_fixed_params)
         _model.set_params(**_params)
-        _cv_results = perform_stratified_group_cv(_model, _x, _y, **_cv_params,
+        _cv_results = perform_stratified_group_cv(_model, _x, _y, _y_strat,  **_cv_params,
                                                   use_early_stopping=_use_early_stopping,
                                                   random_seed_splitting=_seed, n_jobs=_n_jobs)
-
-        # _score = sum(_score_weights[metric] * _cv_results[metric]['mean'] for metric in _cv_results)
-        # _score = _cv_results.scoring['night']['default_thresh']['balanced_accuracy']['mean']
-        # _score = _cv_results.scoring['night']['default_thresh']['auc']['mean']
-        # _score = _cv_results.scoring['night']['default_thresh']['f1']['mean']
 
         _score = (_cv_results.scoring['night']['default_thresh']['f1']['mean']
                   + _cv_results.scoring['night']['default_thresh']['auc']['mean']) / 2
 
-        # todo: make score_metric an argument of class
-
-        # todo: i could also use patient value or value from optiized roc threhsold?
-        # TODO: which score to use? mean or balanced only?
-        #  -> i think balanced accuracy is most unbiased, mean of all metrics could be high because of imbalance
-        # -> or auc/ mix of balanced acc + auc?
         return -_score  # for gp_minimize minus is needed
 
-    def fit(self, x, y, cv_params, n_calls: int, use_early_stopping: bool, n_jobs: int, verbose: bool = True):
+    def fit(self, x, y, y_strat, cv_params, n_calls: int, use_early_stopping: bool, n_jobs: int, verbose: bool = True):
         def objective(params):
             param_dict = {dim.name: param for dim, param in zip(self.param_space, params)}
             top_k = param_dict.pop('top_k_feats')
             _top_k_feat_idcs = [val['idx'] for val in self.feature_map.values() if val['rank'] <= top_k]
             x_top_k = x[:, _top_k_feat_idcs]
             return self._objective(
-                x_top_k, y,
+                x_top_k, y, y_strat,
                 self.model,
                 param_dict,
                 self.fixed_params,

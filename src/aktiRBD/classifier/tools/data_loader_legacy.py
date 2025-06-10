@@ -1,5 +1,4 @@
 import logging
-from collections import defaultdict
 from pathlib import Path
 from typing import Union, List
 
@@ -17,53 +16,36 @@ logger = logging.getLogger(__name__)
 
 
 class DataLoader:
+
     """Manages the retrieval of local and global feature files, processes metadata,
     applies feature aggregation strategies, and prepares train/test datasets."""
 
-    def __init__(self, data_dir: Union[Path, List[Path]], meta_path: Union[Path, pd.DataFrame],
-                 feature_dir: Path, aggregation: List[str],
-                 included_local_features: List[str], included_global_features: List[str],
-                 binary_mapping: dict, add_str_labels: bool = False, verbose: bool = True, shuffle: bool = True):
+    def __init__(self, patient_dir: Path, meta_path: Union[Path, pd.DataFrame], feature_dir: Path, aggregation: str,
+                 included_local_features: list, included_global_features: list, binary_mapping: dict,
+                 add_str_labels: bool = False, verbose: bool = True, shuffle: bool = True):
 
-        self.dataset_is_pooled = isinstance(data_dir, list) and len(data_dir) > 1
-        self.data_dirs = data_dir if isinstance(data_dir, list) else [data_dir]
-        self.feature_dir = feature_dir  # relative to patient_dir
-        self.local_feat_files = sorted([
-            file for base_dir in self.data_dirs  # loop over patient dirs from datasets
-            for file in list(base_dir.glob(f"*/{feature_dir}/*local*.csv"))  # single record/patient
-                        + list(base_dir.glob(f"*/*/{feature_dir}/*local*.csv"))  # multi-record
-        ])
-
+        self.patient_dir = patient_dir
+        self.feature_dir = feature_dir
+        self.local_feat_files = sorted(list(self.patient_dir.glob(f"*/{feature_dir}/*local*.csv"))  # single record
+                                       + list(self.patient_dir.glob(f"*/*/{feature_dir}/*local*.csv")))  # multi record
         if len(self.local_feat_files) == 0:
-            raise UserWarning(f"could not locate local feature files make sure '{self.data_dirs}' exists and "
+            raise UserWarning(f"could not locate local feature files make sure '{self.patient_dir}' exists and "
                               f"contains patient subdirs populated with the feature files.")
 
         self.aggregation = aggregation
         self.binary_mapping = binary_mapping
+        self.meta_df, self.records_train, self.records_test = self._get_meta(meta_path, binary_mapping)
+        self._check_missing_feature_files(self.local_feat_files, self.meta_df)
+        if shuffle:
+            np.random.shuffle(self.records_train)
+            np.random.shuffle(self.records_test)
+
         self.included_local_features = included_local_features
         self.included_global_features = included_global_features
         self.verbose = verbose
         self.add_str_labels = add_str_labels
 
-        self.meta_df, self.records_train, self.records_test = self._get_meta(meta_path)
-
-        if self.dataset_is_pooled:
-            assert self.meta_df is not None and 'dataset_id' in self.meta_df.columns, \
-                "When using multiple datasets, meta file must contain a 'dataset_id' column."
-            assert not self.meta_df['dataset_id'].isnull().any(), \
-                "'dataset_id' column in meta file contains missing values."
-            duplicate_ids = self.meta_df.groupby('ID')['dataset_id'].nunique()
-            conflicting_ids = duplicate_ids[duplicate_ids > 1].index.tolist()
-            assert not conflicting_ids, f"Subject IDs found in multiple datasets: {conflicting_ids}"
-
-            self.map_subject_to_dataset = self.meta_df.set_index('ID')['dataset_id'].to_dict()
-            self.map_dataset_to_data_dir = self._infer_dataset_dir_mapping(self.meta_df, self.data_dirs)
-
-        self.local_feat_files = self._check_and_filter_feature_files(self.local_feat_files, self.meta_df)
         n_hc_train, n_rbd_train, n_hc_test, n_rbd_test = self._get_class_counts(self.meta_df)
-        if shuffle:
-            np.random.shuffle(self.records_train)
-            np.random.shuffle(self.records_test)
 
         self.train_id_map = self.test_id_map = None
         self.num_total_rbd = n_rbd_train + n_rbd_test
@@ -173,85 +155,45 @@ class DataLoader:
         if any(np.isnan(data).sum() > 0 for data in _datasets.values()):
             logging.warning('found NaNs in data: - ' + ', '.join(nan_summary))
         else:
-            if self.verbose:
-                logging.info('no NaNs in x_train, y_train, x_test, y_test.\n')
-        train_dataset_ids = np.array([self.map_subject_to_dataset[_id] for _id in self.train_id_map]) \
-            if self.dataset_is_pooled else None
-        test_dataset_ids = np.array([self.map_subject_to_dataset[_id] for _id in self.test_id_map]) \
-            if self.dataset_is_pooled else None
+            logging.info('no NaNs in x_train, y_train, x_test, y_test.\n')
 
-        train_set = FeatureSet(
-            x=x_train, y=y_train, y_str=y_str_train,  # data and labels
-            group=self.train_id_map, feat_map=feat_map, dataset=train_dataset_ids  # mappings
-        )
-        test_set = FeatureSet(
-            x=x_test, y=y_test, y_str=y_str_test,
-            group=self.test_id_map, feat_map=feat_map, dataset=test_dataset_ids
-        )
+        train_set = FeatureSet(x=x_train, y=y_train, y_str=y_str_train, group=self.train_id_map, feat_map=feat_map)
+        test_set = FeatureSet(x=x_test, y=y_test, y_str=y_str_test, group=self.test_id_map, feat_map=feat_map)
 
         return train_set, test_set, class_weights_train
 
     @staticmethod
-    def _check_and_filter_feature_files(local_feat_files: List[Path], meta_df: pd.DataFrame) -> List[Path]:
-        """ 1) Warn if any expected feature files (according to meta_df) are missing.
-            2) Warn if there are any extra feature files not in the filtered meta_df.
-            3) Return only the files matching the meta_df entries."""
-        # build expected suffixes
-        expected = set()
-        for _, row in meta_df.iterrows():
-            _id = row['ID']
-            rid = str(row.get('record_ID')).strip()
-            suf = _id if pd.isna(row.get('record_ID')) or rid.lower() in {'none', ''} else f"{_id}_{rid}"
-            expected.add(suf)
-
-        # map each actual file to its suffix
-        suffix_to_paths = defaultdict(list)
-        for p in local_feat_files:
-            suf = p.stem.replace("local-features-", "")
-            suffix_to_paths[suf].append(p)
-        actual = set(suffix_to_paths.keys())
-
-        missing, extra = expected - actual, actual - expected
-        if missing:
-            logger.warning(f"Missing {len(missing)} expected feature file(s): {sorted(missing)}")
-        if extra:
-            logger.debug(
-                f"Found {len(extra)} unexpected feature file(s) (excluded or not in meta e.g. because of unmapped "
-                f"diagnosis): {sorted(extra)}")
-
-        # filter the original list, keeping only paths whose suffix is expected
-        filtered = [p for suf, paths in suffix_to_paths.items() if suf in expected for p in paths]
-        return sorted(filtered)
+    def _check_missing_feature_files(local_feat_files: List, meta_df: pd.DataFrame):
+        """ Checks that all entries in the metadata have an existing local feature file. Logs a warning if missing. """
+        expected_record = set()
+        for _, _row in meta_df.iterrows():
+            _id = _row.get('ID')
+            _record_id = str(_row.get('record_ID')).strip() if pd.notna(_row.get('record_ID')) else None
+            _save_suffix = _id if not _record_id else f"{_id}_{_record_id}"
+            expected_record.add(_save_suffix)
+        actual_records = {file.stem.replace("local-features-", "") for file in local_feat_files}
+        missing_records = expected_record - actual_records  # Find missing expected files
+        if missing_records:
+            logger.warning(f"Missing {len(missing_records)} expected feature files of records: {missing_records}")
 
     @staticmethod
     def _assert_binary_labels(y_array, name='y_array'):
         if y_array.size > 0 and not np.array_equal(np.unique(y_array), [0, 1]):
             raise AssertionError(f"{name} contains non-binary labels: {np.unique(y_array)}")
 
-    def _get_meta(self, meta_csv_path: Path):
+    @staticmethod
+    def _get_meta(meta_csv_path: Path, binary_mapping: dict):
         # read meta file
-        meta_df = utils.read_meta_csv_to_df(meta_csv_path, exclude=True, verbose=self.verbose)
+        meta_df = utils.read_meta_csv_to_df(meta_csv_path).query('exclude != 1')
         assert 'diagnosis' in meta_df.columns, f"'meta_df' at {meta_csv_path} must contain a 'diagnosis' column."
         assert not meta_df['diagnosis'].isnull().any(), "'diagnosis' column contains NaN values."
-        assert set(self.binary_mapping.keys()).issubset(set(meta_df['diagnosis'].unique())), \
-            (f"Mapping values {set(self.binary_mapping.keys())} are not a subset of "
+        assert set(binary_mapping.keys()).issubset(set(meta_df['diagnosis'].unique())), \
+            (f"Mapping values {set(binary_mapping.keys())} are not a subset of "
              f"diagnosis values {set(meta_df['diagnosis'].unique())}.")
-        # choose only relevant rows according to binary_mapping, will drop all other rows
-        orig_counts = meta_df['diagnosis'].value_counts().to_dict()
-        if self.verbose:
-            logger.info(f"Original diagnoses (pre‐filter): {orig_counts}")
-        keep_mask = meta_df['diagnosis'].isin(self.binary_mapping.keys())
-        dropped_diags = meta_df.loc[~keep_mask, 'diagnosis'].value_counts().to_dict()
-        if self.verbose:
-            logger.info(f"Dropping {len(meta_df) - keep_mask.sum()} rows with unmapped diagnoses: {dropped_diags}")
-
-        meta_df = meta_df[keep_mask]
-        mapped_counts = meta_df['diagnosis'].value_counts().to_dict()
-        if self.verbose:
-            logger.info(f"Kept {len(meta_df)} rows; mapped diagnoses: {mapped_counts}")
+        # choose only relevant rows according to binary_mapping
+        meta_df = meta_df[meta_df.diagnosis.isin(binary_mapping.keys())]
         # create binary labels
-        meta_df.insert(
-            meta_df.columns.get_loc('diagnosis') + 1, 'binary_label', meta_df.diagnosis.map(self.binary_mapping))
+        meta_df.insert(meta_df.columns.get_loc('diagnosis') + 1, 'binary_label', meta_df.diagnosis.map(binary_mapping))
 
         # get the ids of the training and testing records
         records_train = meta_df.loc[meta_df['train/test'] == 'train'].apply(
@@ -290,30 +232,6 @@ class DataLoader:
 
         return n_hc_train, n_rbd_train, n_hc_test, n_rbd_test
 
-    @staticmethod
-    def _infer_dataset_dir_mapping(meta_df: pd.DataFrame, patient_dirs: List[Path]) -> dict:
-        """Get mapping from dataset_id to patient_dir using file existence checks.
-         Only relevant if self.is_pooled_dataset"""
-        dir_to_dataset_ids = defaultdict(set)
-        for p_dir in patient_dirs:
-            for _, row in meta_df.iterrows():
-                full_path = p_dir / row['ID']
-                if full_path.exists():
-                    dir_to_dataset_ids[p_dir].add(row['dataset_id'])
-
-        patient_dir_to_dataset_id = {}
-        for p_dir, ds_ids in dir_to_dataset_ids.items():
-            if len(ds_ids) != 1:
-                raise ValueError(f"Directory {p_dir} maps to multiple dataset_ids: {ds_ids}")
-            patient_dir_to_dataset_id[p_dir] = list(ds_ids)[0]
-        mapped_dataset_ids = set(patient_dir_to_dataset_id.values())
-        all_dataset_ids = set(meta_df['dataset_id'].unique())
-
-        if mapped_dataset_ids != all_dataset_ids:
-            missing = all_dataset_ids - mapped_dataset_ids
-            raise ValueError(f"No matching patient_dir found for dataset_ids: {missing}")
-        return {v: k for k, v in patient_dir_to_dataset_id.items()}
-
     def _handle_problematic_values(self, df, df_log_name: str, drop: bool, replace: dict, excluded_cols: List[str]):
         """ Handles problematic values in a DataFrame by either dropping the rows or replacing the values.
 
@@ -351,17 +269,12 @@ class DataLoader:
         problematic_counts = is_problematic_df.stack().value_counts()
 
         if self.verbose:
-            total_cells = df[numerical_cols].size
-            total_problematic = int(problematic_counts.sum())
-            frac = total_problematic / total_cells if total_cells else 0.0
-            if total_problematic > 0:
-                detail = ", ".join(f"{typ}: {cnt}" for typ, cnt in problematic_counts.items())
-                logger.info(
-                    f"found {total_problematic} problematic cells ({frac * 100:.1g}% of "
-                    f"{numerical_cols.size} cols×{df.shape[0]} rows) in '{df_log_name}': {detail}. "
-                    f"Using drop={drop}, replace={replace}.")
+            if not problematic_counts.empty:
+                log_message = ", ".join([f"{problem}: {count}" for problem, count in problematic_counts.items()])
+                logger.info(f"found problematic values in '{df_log_name}' dataframe: {log_message}."
+                            f" Using drop={drop}, replace={replace}")
             else:
-                logger.info(f"found no problematic values in '{df_log_name}' DataFrame.")
+                logger.info(f"found no problematic values in '{df_log_name}' dataframe")
 
         if drop:  # drop the problematic rows
             df = df[~is_problematic_df.notna().any(axis=1)]
@@ -377,12 +290,10 @@ class DataLoader:
         return df
 
     def _create_local_feature_dataframe(self, util_cols: List[str] = None):
-        if self.verbose:
-            logger.info('creating local feature DataFrame... ')
+        logger.info('creating local feature dataframe... ')
         util_cols = util_cols if util_cols else [
             'id', 'record_id', 'diagnosis', 'time_start', 'time_end', 'time_diff', 'sptw_start',
             'sptw_end', 'sptw_idx', 'night', 'runtime', 'ident']
-
         with utils.Timer() as timer:
             _li = []
 
@@ -398,11 +309,12 @@ class DataLoader:
                     _df = _df[self.included_local_features + util_cols]
                     _df['record_id'] = _df['record_id'].astype(str).str.strip()
                     _df['record_id'] = _df['record_id'].replace(['none', 'NaN', 'nan', 'None'], None)
-                    _df['record_key'] = _df.apply(lambda row: row['id'] if row['record_id'] is None
-                    else f"{row['id']}_{row['record_id']}", axis=1)
+                    _df['record_key'] = _df.apply(lambda row: row['id'] if row['record_id'] is None \
+                        else f"{row['id']}_{row['record_id']}", axis=1)
                     _li.append(_df)
 
             _local_feat_df = pd.concat(_li, axis=0, ignore_index=True)
+
             _local_feat_df['month'] = pd.to_datetime(_local_feat_df.time_start).dt.month
             _local_feat_df['day'] = pd.to_datetime(_local_feat_df.time_start).dt.day
             _local_feat_df['hour'] = pd.to_datetime(_local_feat_df.time_start).dt.hour
@@ -414,11 +326,11 @@ class DataLoader:
             _local_feat_df = self._handle_problematic_values(
                 _local_feat_df, drop=True, replace=None, df_log_name='local_feat_df', excluded_cols=util_cols)
 
-        if self.verbose:
-            logger.info(f'creating local feature DataFrame... done. ({timer()}s)')
+        logger.info(f'creating local feature dataframe... done. ({timer()}s)')
         return _local_feat_df
 
     def _log_info_(self, n_rbd_train, n_hc_train, n_rbd_test, n_hc_test):
+
         logger.info(
             f"full dataset contains n = {self.num_total} patients:\n"
             f"\t\t - n_rbd = {self.num_total_rbd} ({self.num_total_rbd / self.num_total * 100:.1f}%)\n"
@@ -437,22 +349,6 @@ class DataLoader:
             f"  hc = {n_hc_test:2.0f} "
             f"({n_hc_test / (n_rbd_test + n_hc_test) * 100 if n_rbd_test + n_hc_test != 0 else 0:4.1f}%)"
         )
-
-        if self.dataset_is_pooled:
-            logger.info("Dataset-wise contributions:")
-            for dataset_id in sorted(self.meta_df['dataset_id'].unique()):
-                df_subset = self.meta_df[self.meta_df['dataset_id'] == dataset_id]
-                for split in ['train', 'test']:
-                    df_split = df_subset[df_subset['train/test'] == split]
-                    count_total = df_split.shape[0]
-                    count_rbd = df_split[df_split['binary_label'] == 1].shape[0]
-                    count_hc = df_split[df_split['binary_label'] == 0].shape[0]
-                    logger.info(
-                        f"\t - dataset {dataset_id} ({split}): total = {count_total:3d}, "
-                        f"rbd = {count_rbd:3d}, hc = {count_hc:3d}, "
-                        f"rbd = {count_rbd / count_total * 100 if count_total > 0 else 0:4.1f}%, "
-                        f"hc = {count_hc / count_total * 100 if count_total > 0 else 0:4.1f}%"
-                    )
 
     def _aggregate_local_to_global(self, _local_df_copy: pd.DataFrame, use_numba: bool):
 
@@ -514,8 +410,7 @@ class DataLoader:
             global_feat_df = _local_df_copy.groupby(['record_key', 'night'])[
                 self.included_local_features + ['id', 'record_id', 'ground_truth', 'diagnosis']
                 ].agg(reducer).reset_index()
-            if self.verbose:
-                logger.info(f"local to global aggregation done. ({agg_timer()}s)")
+            logger.info(f"local to global aggregation done ({agg_timer()}s)")
         global_feat_df.columns = ['_'.join(col).strip() if col[1] else col[0] for col in global_feat_df.columns]
         global_feat_df.rename(columns={'ground_truth__unique_first': 'ground_truth'}, inplace=True)
         global_feat_df.rename(columns={'diagnosis__unique_first': 'diagnosis'}, inplace=True)
@@ -545,14 +440,8 @@ class DataLoader:
                 global_feat_df.groupby('record_key')['record_id'].first()):
 
             # glob the global feature files for each record
-            if self.dataset_is_pooled:
-                _dataset_id = self.map_subject_to_dataset[_id]
-                patient_dir = self.map_dataset_to_data_dir[_dataset_id]
-            else:
-                patient_dir = self.data_dirs[0]
-
-            _feature_dir_path = (patient_dir / f"{_id}/{self.feature_dir}" if _record_id in [None, 'None']
-                                 else patient_dir / f"{_id}" / f"{_id}_{_record_id}/{self.feature_dir}")
+            _feature_dir_path = self.patient_dir.joinpath(f"{_id}/{self.feature_dir}") if _id == _record_key \
+                else self.patient_dir.joinpath(f"{_id}/{_record_id}/{self.feature_dir}")  # for multi-records per id
 
             _global_feat_paths = sorted(list(_feature_dir_path.glob('*global*.csv')))
             if len(_global_feat_paths) != 1:
@@ -570,3 +459,4 @@ class DataLoader:
                     if dup_col in global_feat_df.columns:
                         global_feat_df[col] = global_feat_df[col].fillna(global_feat_df.pop(dup_col))
         return global_feat_df
+

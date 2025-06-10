@@ -152,7 +152,8 @@ def infer_mean_sample_rate(df: pd.DataFrame, mute_logging: bool = True):
             std_sample_rate (float): Standard deviation of the sampling rate in Hz, rounded to two decimals."""
     assert isinstance(df.index, pd.DatetimeIndex), "DataFrame must have 'DatetimeIndex'"
     time_diffs = df.index.to_series().diff().dt.total_seconds().values[1:]
-    mean_sample_rate, std_sample_rate = 1 / np.mean(time_diffs), np.std(1 / time_diffs)  # not a typo
+    with np.errstate(divide='ignore', invalid='ignore'):  # ignore warning when df still contains duplicate timestamps
+        mean_sample_rate, std_sample_rate = 1 / np.mean(time_diffs), np.std(1 / time_diffs)  # not a typo
     is_uniform = True if len(np.unique(time_diffs)) == 1 and np.isclose(std_sample_rate, 0) else False
     if not is_uniform and not mute_logging:
         logger.info(f"non-uniform sampling rate detected: "

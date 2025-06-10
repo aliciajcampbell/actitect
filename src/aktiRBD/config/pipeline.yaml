@@ -74,6 +74,7 @@ data:
 nested_cv:
   n_repeats:  5
   n_jobs: -1
+  stratify_by_dataset_if_pooled: True
   outer_cv:
     n_splits: 5
     shuffle: True

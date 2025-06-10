@@ -27,6 +27,18 @@ from skopt.space import Dimension
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
+try:
+    from numba import njit as _numba_njit
+    NUMBA_AVAILABLE = True
+except ImportError:        # user did not install numba ⇒ graceful fallback
+    NUMBA_AVAILABLE = False
+
+    # no-op stand-in that accepts the same signature as njit(...)
+    def _numba_njit(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
 __all__ = [
     'get_experiment_root',
     'detect_csv_delimiter',
@@ -62,7 +74,8 @@ __all__ = [
     'trim_whitespace_df',
     'list_subdirectories',
     'compute_pearson_ci',
-    'compute_mean_std_ci'
+    'compute_mean_std_ci',
+    'optional_njit'
 ]
 
 logger = logging.getLogger(__name__)
@@ -154,7 +167,7 @@ def detect_csv_delimiter(file_path):
             return ';'
 
 
-def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False):
+def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False, verbose: bool = True):
     delimiter = detect_csv_delimiter(path_to_csv)
     meta_df = pd.read_csv(path_to_csv, delimiter=delimiter)
     meta_df.columns = meta_df.columns.str.strip()
@@ -176,7 +189,8 @@ def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False):
     if exclude and 'exclude' in meta_df.columns:
         excluded_rows = meta_df[meta_df['exclude'] == 1]
         dropped_ids = excluded_rows['ID'].tolist()
-        logger.info(f"Dropping {len(excluded_rows)} row(s) with exclude == 1. IDs: {dropped_ids}")
+        if verbose:
+            logger.info(f"Dropping {len(excluded_rows)} row(s) with exclude == 1. IDs: {dropped_ids}")
         meta_df = meta_df[meta_df['exclude'] != 1]
 
     # ensure required columns exist:
@@ -211,8 +225,12 @@ def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False):
 
         return group
 
-    return meta_df.groupby('ID', group_keys=False).apply(
+    meta_df = meta_df.groupby('ID', group_keys=False).apply(
         lambda g: _assign_record_ID(g, g.name), include_groups=False)
+
+    assert not meta_df.duplicated(subset=['ID', 'record_ID']).any(), \
+        "Duplicate combinations of 'ID' and 'record_ID' found in meta file."
+    return meta_df
 
 
 def load_yaml_file(path):
@@ -836,3 +854,8 @@ def compute_mean_std_ci(data: np.ndarray, confidence_level: float):
         ci_lower = mean_val - margin
         ci_upper = mean_val + margin
     return mean_val, std_val, ci_lower, ci_upper, margin
+
+def optional_njit(*args, **kwargs):
+    """Decorate a function with numba.njit if Numba is present,
+    otherwise leave it as plain Python."""
+    return _numba_njit(*args, **kwargs)

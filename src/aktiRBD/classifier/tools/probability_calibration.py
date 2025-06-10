@@ -21,11 +21,13 @@ __all__ = ['CustomCalibratedClassifierCV', 'draw_calibration_curve']
 class CustomCalibratedClassifierCV(CalibratedClassifierCV):
     """ Custom subclass of CalibratedClassifierCV to enable grouped cv and early stopping. """
 
-    def __init__(self, estimator=None, *, method="sigmoid", cv=None, n_jobs=None, ensemble=True,
-                 base_estimator="deprecated", pass_fold_as_eval_set=False):
+    def __init__(self, estimator=None, *, method: str = 'sigmoid', cv=None, n_jobs: int = None, ensemble: bool = True,
+                 base_estimator: str = "deprecated", pass_fold_as_eval_set: bool = False):
 
         super().__init__(estimator=estimator, method=method, cv=cv, n_jobs=n_jobs, ensemble=ensemble,
                          base_estimator=base_estimator)
+
+        self.calibrated_classifiers_, self.classes_ = None, None
         self.pass_fold_as_eval_set = pass_fold_as_eval_set  # added to enable early stopping.
 
     # noinspection PyPep8Namin
@@ -62,9 +64,7 @@ class CustomCalibratedClassifierCV(CalibratedClassifierCV):
             if hasattr(cv, "n_splits"):
                 n_folds = cv.n_splits
                 if any((y == cl).sum() < n_folds for cl in self.classes_):
-                    raise ValueError(
-                        f"Requesting {n_folds}-fold CV but < {n_folds} examples for at least one class."
-                    )
+                    raise ValueError(f"Requesting {n_folds}-fold CV but < {n_folds} examples for at least one class.")
 
             if self.ensemble:
                 from joblib import Parallel, delayed
@@ -84,14 +84,11 @@ class CustomCalibratedClassifierCV(CalibratedClassifierCV):
                 predictions = self._compute_predictions(
                     partial(cross_val_predict, estimator=this_estimator, X=X, y=y, cv=cv, method=method_name,
                             n_jobs=self.n_jobs, fit_params=fit_params),
-                    method_name,
-                    X,
-                    n_classes
-                )
+                    method_name, X, n_classes)
 
                 this_estimator.fit(X, y, **fit_params)
-                calibrated_classifier = self._fit_calibrator(this_estimator,
-                                                             predictions, y, self.classes_, self.method, sample_weight)
+                calibrated_classifier = self._fit_calibrator(
+                    this_estimator, predictions, y, self.classes_, self.method, sample_weight)
                 self.calibrated_classifiers_.append(calibrated_classifier)
 
         # Copy attribute logic from base class
@@ -161,10 +158,10 @@ def draw_calibration_curve(y_train, y_prob_train, hist_bin_width=.025):
     ax1.tick_params(axis='both', which='minor', direction='in', length=4, width=1, top=True, right=True)
     ax1.set_title('calibration curve', fontweight='bold', fontsize=12, pad=10)
     ax1.fill_between([0, 1], 0, [0, 1], color='c', alpha=.12)
-    ax1.text(.66, .33, 'UNDER CONFIDENT', color='c', fontsize=11, rotation=45, fontweight='normal',
+    ax1.text(.66, .33, 'OVER CONFIDENT', color='c', fontsize=11, rotation=45, fontweight='normal',
              va='center', ha='center')
     ax1.fill_between([0, 1], [0, 1], 1, color='m', alpha=.12)
-    ax1.text(.33, .66, 'OVER CONFIDENT', color='m', fontsize=11, rotation=45, fontweight='normal', alpha=.7,
+    ax1.text(.33, .66, 'UNDER CONFIDENT', color='m', fontsize=11, rotation=45, fontweight='normal', alpha=.7,
              va='center', ha='center')
     ax1.legend(frameon=False, loc=(.05, .85), fontsize=11)
 

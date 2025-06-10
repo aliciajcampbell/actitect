@@ -37,12 +37,14 @@ class FeatureSet:
     y_str: Optional[np.ndarray] = field(default=None)
     # dict-type flag to indicate association to Fold, default is None, i.e. no Fold instance associated
     from_fold: Optional[dict] = field(default=None)
+    # optional, mapping between the instance and the corresponding dataset, only relevant for multi-center model
+    dataset: Optional[np.ndarray] = field(default=None)  # shape = (n_samples,)
 
     def __str__(self):
-        return (f"FeatureSet(x.shape={self.x.shape},"
-                f" probs={self.prob.shape if isinstance(self.prob, np.ndarray) else None},"
-                f" process_params={self.process_params},"
-                f" from_fold={self.from_fold})")
+        ds = set(self.dataset) if self.dataset is not None else None
+        probs_shape = self.prob.shape if isinstance(self.prob, np.ndarray) else None
+        return (f"FeatureSet(x.shape={self.x.shape}, probs={probs_shape}, process_params={self.process_params}, "
+                f"from_fold={self.from_fold}, datasets={ds})")
 
     def copy(self):
         return deepcopy(self)
@@ -71,8 +73,9 @@ class FeatureSet:
         new_y = self.y[sample_indices]
         new_group = self.group[sample_indices]
         new_prob = self.prob[sample_indices] if self.prob is not None else None
+        new_dataset = self.dataset[sample_indices] if self.dataset is not None else None
         return FeatureSet(x=new_x, y=new_y, group=new_group, feat_map=self.feat_map, process_params=self.process_params,
-                          prob=new_prob)
+                          prob=new_prob, dataset=new_dataset)
 
     def fit_transform(self, scaler: str, use_smote: bool, smote_seed: int, scaling_order: Optional[str] = None,
                       rank_kwargs: Optional[dict] = None):
@@ -150,8 +153,37 @@ class FeatureSet:
         if self.prob is not None and other.prob is not None:
             merged_prob = np.concatenate((self.prob, other.prob))
 
+        merged_dataset = None
+        if self.dataset is not None and other.dataset is not None:
+            merged_dataset = np.concatenate((self.dataset, other.dataset))
+
         return FeatureSet(
-            x=merged_x, y=merged_y, group=merged_group, feat_map=self.feat_map, process_params=None, prob=merged_prob)
+            x=merged_x, y=merged_y, group=merged_group, feat_map=self.feat_map,
+            process_params=None, prob=merged_prob, dataset=merged_dataset)
+
+    def get_strat_labels(self, stratify_by_dataset_if_pooled: bool = False):
+        """ Create labels for stratification based on the y and dataset. For non_pooled datasets, just by class."""
+        is_pooled = self.dataset is not None and len(np.unique(self.dataset)) > 1
+        if is_pooled:
+            if stratify_by_dataset_if_pooled:
+                logger.info("Pooled dataset detected. Performing stratification by class + dataset.")
+
+                if len(self.dataset) != len(self.y):
+                    print(self.dataset)
+                    print(self.y)
+                    raise ValueError(f"Length mismatch between `data.dataset` ({self.dataset.shape}) and `data.y` ({self.y.shape}).")
+
+                dtype = f"<U{max(map(len, self.dataset.astype(str))) + max(map(len, self.y.astype(str))) + 1}"
+                sep = np.full(len(self.y), "_", dtype=dtype)
+                y_strat = np.char.add(np.char.add(self.dataset.astype(dtype), sep), self.y.astype(dtype))
+
+            else:
+                logger.info("Pooled dataset detected. Stratification by dataset is disabled.")
+                y_strat = self.y
+        else:
+            y_strat = self.y
+
+        return y_strat
 
     def _apply_scaler(self, scaler_info: Optional[dict] = None):
         """ Applies scaling to the FeatureSet using the specified or precomputed scaler parameters.
@@ -201,9 +233,11 @@ class FeatureSet:
             self.smote_mask: Mask indicating synthetic samples.
             self.process_params['SMOTE']: SMOTE-related parameters."""
         # apply smote (logging handled internally)
-        x_smote, y_smote, group_smote, smote_mask = apply_smote_with_group_mapping(self.x, self.y, self.group, seed)
+        x_smote, y_smote, group_smote, dataset_smote, smote_mask = apply_smote_with_group_mapping(
+            self.x, self.y, self.group, self.dataset, seed)
         # update class attributes
-        self.x, self.y, self.group, self.smote_mask = x_smote, y_smote, group_smote, smote_mask
+        self.x, self.y, self.group, self.dataset, self.smote_mask = \
+            x_smote, y_smote, group_smote, dataset_smote, smote_mask
         num_new_samples = x_smote.shape[0] - self.x.shape[0]
         self.process_params['SMOTE'] = {'used': True, 'num_new_samples': num_new_samples, 'seed': seed}
 
@@ -213,9 +247,9 @@ class FeatureSet:
             :param rank_kwargs (Dict): Arguments for the ranking method.
         Returns:
                 Dict: Feature rankings (maps each feature to its rank)."""
-        from aktiRBD.features import ranking
-        # fetch or compute feature ranks
-        return ranking.fetch_or_compute_feat_ranks(self, **rank_kwargs)
+        from aktiRBD.features.ranking import FeatureRanker
+        ranker = FeatureRanker(**rank_kwargs)
+        return ranker.fetch_or_compute(data=self)  # fetch or compute feature ranks
 
 
 @dataclass

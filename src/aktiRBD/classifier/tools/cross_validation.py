@@ -25,6 +25,7 @@ def perform_stratified_group_cv(
         model,
         x_train: np.ndarray,
         y_train: np.ndarray,
+        y_strat: np.ndarray,
         group: np.ndarray,
         use_early_stopping: bool,
         n_folds: int,
@@ -47,6 +48,7 @@ def perform_stratified_group_cv(
         :param model: A sklearn estimator that has a .fit() function.
         :param x_train: (np.ndarray) the training data of shape (n_samples, n_features).
         :param y_train: (np.ndarray) the training labels of shape (n_samples,).
+        :param y_strat: (np.ndarray) the stratification labels of shape (n_samples,).
         :param group: (np.ndarray) of shape (n_samples,) to map each sample to a group (e.g. patient).
         :param use_early_stopping: (bool) whether to use early stopping or not.
         :param n_folds: (int) how many splits to perform per repeat. Determines the train/valid ratio.
@@ -247,7 +249,7 @@ def perform_stratified_group_cv(
             k, train_index, val_index, model, x_train, y_train, group, use_early_stopping, patient_aggregation_function,
             return_history, debug_print, mean_roc_fpr, _methods, _scoring_history_placeholder)
                               for k, (train_index, val_index)
-                              in enumerate(sgkf.split(x_train, y_train, group)))
+                              in enumerate(sgkf.split(x_train, y_strat, group)))
 
     # Initialize the dictionaries for aggregation
     scoring_history_per_night = {method: copy.deepcopy(_scoring_history_placeholder) for method in _methods}

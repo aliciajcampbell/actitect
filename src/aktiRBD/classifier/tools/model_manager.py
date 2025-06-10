@@ -87,20 +87,23 @@ class ModelManager:
                 pbar.update(1)
 
     def pretrain(self, train: FeatureSet, test: FeatureSet):
-        """Like fit but will save the models to a given directory instead of evaluating them directly. Mainly used to
-        create final models for external testing."""
+        """Like .eval() but will save the models to a given directory instead of evaluating them directly.
+         Mainly used to create the final models for external testing."""
         # init model
         self.model_setup = self._get_model_setup(self.config.model.which, train.y, self.random_state)
         chosen_hp_setups = {exp.hp_setup_name for exp in self.config.final_model.experiments}
 
         # if specified, create a merged cologne training set (train + test), can only be used for external data testing
+        train_full_processed, hp_setups_full = None, []
         if self.config.final_model.include_pretrain_full:
-            train_full = train.merge(test)
-            train_full_processed = train_full.copy().fit_transform(rank_kwargs=self.rank_kwargs, **self.process_kwargs)
-            with self._set_current_context('pretrain_cgn_full'):
-                hp_setups_full = self._get_hp_setups(train_full_processed, chosen_hp_setups)
-        else:
-            train_full_processed, hp_setups_full = None, []
+            if test is None:
+                logger.warning("include_pretrain_full=True but test=None; skipping full training merge.")
+            else:
+                train_full = train.merge(test)
+                train_full_processed = train_full.copy().fit_transform(rank_kwargs=self.rank_kwargs,
+                                                                       **self.process_kwargs)
+                with self._set_current_context('pretrain_cgn_full'):
+                    hp_setups_full = self._get_hp_setups(train_full_processed, chosen_hp_setups)
 
         # precess features: scaling, ranking, smote (always call after combined set is created!)
         train_processed = train.copy().fit_transform(rank_kwargs=self.rank_kwargs, **self.process_kwargs)
@@ -122,7 +125,7 @@ class ModelManager:
                     logger.warning(f"Skipping experiment '{exp.name}':"
                                    f" hp strategy '{exp.hp_setup_name}' not computed.")
                     continue
-                model_dict_cgn.update(self._train_models(train_processed, _hp_setup, experiment=exp, pbar=pbar))
+                model_dict_cgn.update(self._train_model(train_processed, _hp_setup, experiment=exp, pbar=pbar))
                 pbar.update(1)
 
             # second loop for full pretrain if enabled
@@ -134,7 +137,7 @@ class ModelManager:
                                        f" HP setup '{exp.hp_setup_name}' not computed.")
                         continue
                     model_dict_full.update(
-                        self._train_models(train_full_processed, _hp_setup_full, experiment=exp, pbar=pbar))
+                        self._train_model(train_full_processed, _hp_setup_full, experiment=exp, pbar=pbar))
                     pbar.update(1)
 
         model_save_path_list = self.config.final_model.save_path_models
@@ -173,9 +176,9 @@ class ModelManager:
                     raise SystemExit("todo: add per patient predictions to dataframe and save it...")"""
         raise NotImplementedError('todo')
 
-    def _train_models(self, train: FeatureSet, hp_setup: HpSetup, experiment: ExperimentConfig,
-                      test: FeatureSet = None, pbar=None):
-        """ Train the models for each HpSetup instance. Different modes to create models either for Cologne or
+    def _train_model(self, train: FeatureSet, hp_setup: HpSetup, experiment: ExperimentConfig,
+                     test: FeatureSet = None, pbar=None):
+        """ Train the model for each HpSetup instance. Different modes to create model either for Cologne or
         external testing scenario.
         Parameters:
             :param hp_setup: (HpSetup) the choice of hyperparameters.
@@ -209,7 +212,7 @@ class ModelManager:
         # initialize model with computed hps
         opt_model = self.model_setup.model().set_params(**hps)
 
-        # Apply early stopping settings based on the experiment.
+        # apply early stopping settings based on the experiment.
         if experiment.early_stopping:
             opt_model.set_params(**{'early_stopping_rounds': 10, 'eval_metric': ['logloss']})
         else:

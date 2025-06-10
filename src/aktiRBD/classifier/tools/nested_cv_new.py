@@ -1,15 +1,20 @@
+import json
 import logging
 import math
 import sys
 import tracemalloc
+import uuid
+from abc import ABC, abstractmethod
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import List
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
-from sklearn.model_selection import StratifiedGroupKFold
+from sklearn.model_selection import StratifiedGroupKFold, LeaveOneGroupOut
 from skopt.plots import plot_convergence
 
 from aktiRBD import utils
@@ -25,51 +30,87 @@ from aktiRBD.utils import visualization
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['NestedCV']
+__all__ = ['KFoldNestedCV', 'LODONestedCV']
 
 
-class NestedCV:
+class NestedCVBase(ABC):
 
     def __init__(self, config: PipelineConfig, save_path: Path, early_stopping_options: list = None):
-
         self.config = config
         self.save_path = save_path
-        self.n_repeats = config.nested_cv.n_repeats
         self.random_state = config.random_state
         self.n_jobs = config.nested_cv.n_jobs
-        self.inner_seeds = \
-            self._generate_random_seeds(self.random_state, self.n_repeats, config.nested_cv.outer_cv.n_splits)
+        self.n_datasets, self.inner_seeds, self.n_repeats, self.outer_splits = None, None, None, None
+
         self.early_stopping_options = early_stopping_options if early_stopping_options is not None \
             else [True, False] if config.model.which == 'xgboost' else [False]
 
-    def __str__(self):
-        return (f"NestedCV(repeats={self.n_repeats},"
-                f" outer_folds={self.config.nested_cv.outer_cv.n_splits},"
-                f" inner_folds={self.config.nested_cv.inner_cv.n_splits},"
-                f" n_jobs={self.n_jobs}, random_state={self.random_state})")
+    def __str__(self) -> str:
+
+        def __fmt(val):
+            """Return val as str, but show “?” when None."""
+            return "?" if val is None else val
+
+        flavour = self.__class__.__name__
+        return (
+            f"{flavour}("
+            f"datasets={__fmt(self.n_datasets)}, "
+            f"repeats={__fmt(self.n_repeats)}, "
+            f"outer_splits={__fmt(getattr(self, 'outer_splits', None))},"
+            f"inner_splits={self.config.nested_cv.inner_cv.n_splits}, "
+            f"n_jobs={self.n_jobs}, seed={self.random_state})"
+        )
+
+    @abstractmethod
+    def _get_outer_splitter(self, seed: int):
+        """Should return a parametrised sklearn splitter instance (that supports grouping)."""
+        raise NotImplementedError('abstract method')
+
+    @abstractmethod
+    def _get_outer_groups(self, data: FeatureSet):
+        """Array passed as `groups=` to cv_iterator for the outer loop."""
+        raise NotImplementedError('abstract method')
 
     def fit(self, data: FeatureSet):
-        with utils.custom_tqdm(total=self.n_repeats) as pbar:
-            pbar.set_description(f"[PROGRESS]: Nested CV repeats")
+
+        # post-init setup (needs data)
+        self.n_datasets = self._count_unique_datasets(data)
+        self.n_repeats = 1 if isinstance(self, LODONestedCV) else self.config.nested_cv.n_repeats
+        self.outer_splits = self.n_datasets if isinstance(self, LODONestedCV) \
+            else self.config.nested_cv.outer_cv.n_splits
+        self.inner_seeds = self._generate_random_seeds(self.random_state, self.n_repeats, self.outer_splits)
+        if data.dataset is None:
+            ds_summary = {"single": len(data.y)}
+        else:
+            labels, counts = np.unique(data.dataset, return_counts=True)
+            ds_summary = {str(_l): int(_c) for _l, _c in zip(labels, counts)}
+        seeds_dict = dict(outer=[self.random_state + r for r in range(self.n_repeats)], inner=self.inner_seeds)
+        _manifest_kwargs = dict(
+            save_dir=self.save_path, flavour=self.__class__.__name__.replace("NestedCV", "").lower(),
+            repeats=self.n_repeats, outer_folds_expected=self.outer_splits,
+            inner_folds=self.config.nested_cv.inner_cv.n_splits, seeds=seeds_dict, dataset_summary=ds_summary)
+
+        with utils.custom_tqdm(total=self.n_repeats) as pbar, self._manifest_guard(**_manifest_kwargs):
+            pbar.set_description(f"[PROGRESS]: {self.__class__.__name__}")
             _process_kwargs = self.config.data.processing.dict()
             _process_kwargs.update({'smote_seed': self.random_state})
-            logger.info(f"(nested-cv): using processing params {_process_kwargs}.")
+            logger.info(f"({self.__class__.__name__}): using processing params {_process_kwargs}.")
 
             tracemalloc.start()
             for repeat in range(self.n_repeats):
                 outer_seed = self.random_state + repeat
-                outer_cv = StratifiedGroupKFold(**self.config.nested_cv.outer_cv.dict(), random_state=outer_seed)
-                _load_path_rankings = self.config.nested_cv.load_path_cv_feature_rankings.joinpath(
+                outer_cv = self._get_outer_splitter(outer_seed)
+                _rankings_root_dir = self.config.nested_cv.load_path_cv_feature_rankings.joinpath(
                     f"seed_{outer_seed}_{sys.platform}")
-                _rank_kwargs = {'rank_path': _load_path_rankings, 'data_config': self.config.data,
-                                'n_jobs': self.n_jobs}
+                _rank_kwargs = {'root_dir': _rankings_root_dir, 'data_config': self.config.data, 'n_jobs': self.n_jobs}
                 save_path_repeat = utils.check_make_dir(self.save_path.joinpath(
                     f"repeats/repeat{repeat}_seed{outer_seed}"), True)
 
                 tasks = [delayed(self._perform_outer_fold)(
                     k_outer, train_outer, valid_outer, save_path_repeat, outer_seed=outer_seed
                 ) for k_outer, train_outer, valid_outer in cv_iterator(
-                    outer_cv, data, _process_kwargs, _rank_kwargs, self.config.nested_cv.stratify_by_dataset_if_pooled)]
+                    outer_cv, data, _process_kwargs, _rank_kwargs,
+                    self.config.nested_cv.stratify_by_dataset_if_pooled, groups=self._get_outer_groups(data))]
 
                 with Parallel(n_jobs=self.n_jobs) as parallel:
                     parallel(tasks)
@@ -79,12 +120,14 @@ class NestedCV:
                 logger.info(f"repeat {repeat + 1}/{self.n_repeats}:"
                             f" current memory usage: {current / 1024 / 1024:.2f} MB;"
                             f" peak: {peak / 1024 / 1024:.2f} MB")
+
                 tracemalloc.clear_traces()
 
             tracemalloc.stop()
 
     def _perform_outer_fold(self, k_outer, train_outer, valid_outer, save_path_repeat, outer_seed):
         with self._handle_parallel_logging():
+
             save_path_fold = utils.check_make_dir(save_path_repeat.joinpath(f'outer_fold_{k_outer}'), True)
             inner_seed = self.inner_seeds[outer_seed][k_outer]
             self._set_random_seed(inner_seed)
@@ -98,7 +141,7 @@ class NestedCV:
             # fit and eval non-optimized model:
             default_model = model_setup.model().set_params(**model_setup.default_params)
             _default_scores = self._fit_and_eval_model(default_model, train_outer, valid_outer)
-            logger.info(f" default model outer fold {k_outer}: {utils.fmt_dict(_default_scores['valid'])}")
+            logger.info(f"default model outer fold {k_outer}: {utils.fmt_dict(_default_scores['valid'])}")
             utils.dump_to_json(_default_scores, save_path_fold.joinpath(f"default_model_scores.json"))
             del _default_scores
 
@@ -166,7 +209,6 @@ class NestedCV:
     def _perform_inner_cv_bayes_opt(outer_fold: Fold, model_setup: ModelSetup, rank_map: dict, fit_params: dict,
                                     save_path: Path, inner_cv_seed: int, stratify_by_dataset: bool,
                                     plot_search_history: bool = True):
-
         # run Bayesian Optimization on inner-cv:
         bayesian_opt = BayesianOptCV(model_setup=model_setup, feat_rank_map=rank_map, seed=inner_cv_seed)
         y_strat = outer_fold.get_strat_labels(stratify_by_dataset)
@@ -214,11 +256,12 @@ class NestedCV:
                 fold_valid.y, y_prob=model.predict_proba(fold_valid.x)[:, 1], threshold=threshold)}
 
     def eval(self):
-
         fold_dirs = sorted([_dir for _dir in self.save_path.glob('**/outer_fold*') if _dir.is_dir()])
-        assert len(fold_dirs) == self.n_repeats * self.config.nested_cv.outer_cv.n_splits, \
+
+        _expected_outer = self.n_datasets if isinstance(self, LODONestedCV) else self.config.nested_cv.outer_cv.n_splits
+        assert len(fold_dirs) == self.n_repeats * _expected_outer, \
             (f"incomplete outer cv detected, found {len(fold_dirs)} folds at {self.save_path.stem} "
-             f"but got n_splits={self.config.nested_cv.outer_cv.n_splits}.")
+             f"but got n_splits={_expected_outer}.")
 
         # HP* search summary
         hp_summary, top_k_summary = self._make_hp_summary(fold_dirs)
@@ -232,9 +275,9 @@ class NestedCV:
         bp_night, bp_patient = self._draw_history_boxplots(scores, self.config.nested_cv.log_night_eval)
         for _lvl, _fig_dict in zip(['night', 'patient'], [bp_night, bp_patient]):
             if _fig_dict:  # non-empty dict
-                _save_path = utils.check_make_dir(self.save_path.joinpath(f'boxplots/{_lvl}'), True)
+                __save_path = utils.check_make_dir(self.save_path.joinpath(f'boxplots/{_lvl}'), True)
                 for _name, _fig in _fig_dict.items():
-                    _fig.savefig(_save_path.joinpath(f'{_name}.png'), dpi=400,  bbox_inches='tight')
+                    _fig.savefig(__save_path.joinpath(f'{_name}.png'), dpi=400, bbox_inches='tight')
 
         # mean roc/pr curve plots:
         curve_figs_night, curve_figs_patient = self._draw_mean_curves(curves, self.config.nested_cv.log_night_eval)
@@ -283,17 +326,17 @@ class NestedCV:
     @staticmethod
     def _collect_scoring_history(fold_dirs: list[Path], early_stop_options: list) -> (dict, dict, dict):
         """
-        Collects scoring history across folds for the new Evaluator output.
-        For each fold and for each early-stopping option (i.e. "early_stopping" and "no_early_stopping"),
-        it reads the following files (if available):
-          - default_model_scores.json (at the root of each fold)
-          - night_scores.json from the fixed subfolder (e.g. <fold_dir>/<es_key>/night/night_scores.json)
-          - patient_scores.json from the fixed subfolder (e.g. <fold_dir>/<es_key>/patient_scores.json)
-        It then aggregates these results across folds.
-        Returns:
-          scores: dict with keys "default_night", "opt_night", and "opt_patient".
-          (curves and cms could be handled similarly if needed.)
-        """
+            Collects scoring history across folds for the new Evaluator output.
+            For each fold and for each early-stopping option (i.e. "early_stopping" and "no_early_stopping"),
+            it reads the following files (if available):
+              - default_model_scores.json (at the root of each fold)
+              - night_scores.json from the fixed subfolder (e.g. <fold_dir>/<es_key>/night/night_scores.json)
+              - patient_scores.json from the fixed subfolder (e.g. <fold_dir>/<es_key>/patient_scores.json)
+            It then aggregates these results across folds.
+            Returns:
+              scores: dict with keys "default_night", "opt_night", and "opt_patient".
+              (curves and cms could be handled similarly if needed.)
+            """
         # Convert boolean early_stop_options to string keys.
         es_keys = ["early_stopping" if es else "no_early_stopping" for es in early_stop_options]
 
@@ -303,7 +346,7 @@ class NestedCV:
         opt_patient = {es: [] for es in es_keys}
 
         curves = {lvl: {es: {'roc': {'fpr': [], 'tpr': [], 'auc': [], 'op_point': []},
-                             'pr':{'rec': [], 'prec': [], 'f1_max': [], 'op_point_dist': [], 'op_point_f1': []}}
+                             'pr': {'rec': [], 'prec': [], 'f1_max': [], 'op_point_dist': [], 'op_point_f1': []}}
                         for es in es_keys} for lvl in ['night', 'patient']}
 
         cms = {lvl: {es: [] for es in es_keys} for lvl in ['night', 'patient']}
@@ -387,8 +430,7 @@ class NestedCV:
         return scores, curves, cms
 
     @staticmethod
-    def _draw_history_boxplots(scores: dict[pd.DataFrame], include_night: bool):
-
+    def _draw_history_boxplots(scores: dict[str, pd.DataFrame], include_night: bool):
         figs_night, figs_patient = {}, {}
 
         def _recurse_dict_(d, key_path='', figs_dict=None):
@@ -401,15 +443,15 @@ class NestedCV:
                     figs_dict[new_key_path] = visualization.draw_cv_boxplot(
                         {metric: value.loc[metric, :].values for metric in value.index})
                     plt.close('all')
+
         if include_night:
             _recurse_dict_(scores['opt_night'], figs_dict=figs_night)
         _recurse_dict_(scores['opt_patient'], figs_dict=figs_patient)
         return figs_night, figs_patient
 
     @staticmethod
-    def _draw_mean_curves(curves: dict[list], include_night: bool):
-
-        figs_night, figs_patient = {},{}
+    def _draw_mean_curves(curves: dict[str, List], include_night: bool):
+        figs_night, figs_patient = {}, {}
 
         def _recurse_dict_(d, key_path='', figs_dict=None):
             for key, value in d.items():
@@ -424,6 +466,7 @@ class NestedCV:
                         figs_dict[new_key_path] = visualization.draw_cv_roc_or_pr_curve(value, 'roc')
                     elif 'pr' in new_key_path:
                         figs_dict[new_key_path] = visualization.draw_cv_roc_or_pr_curve(value, 'pr')
+
         if include_night:
             _recurse_dict_(curves.get('night'), figs_dict=figs_night)
         _recurse_dict_(curves.get('patient'), figs_dict=figs_patient)
@@ -451,6 +494,60 @@ class NestedCV:
             if self.is_parallel:
                 for _logger, level in previous_levels.items():
                     _logger.setLevel(level)
+
+    @staticmethod
+    @contextmanager
+    def _manifest_guard(save_dir: Path, *, flavour: str, repeats: int, outer_folds_expected: int, inner_folds: int,
+                        seeds: dict, dataset_summary: dict):
+        """ Create/maintain *manifest.json* that tracks the progress of a Nested-CV run."""
+        manifest_path = save_dir.joinpath('manifest.json')
+
+        def __utc_now() -> str:
+            return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        def __atomic_write(path: Path, payload: dict):
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(payload, indent=2))
+            tmp.replace(path)
+
+        manifest = dict(run_id=str(uuid.uuid4()), flavour=flavour, started_at=__utc_now(), finished_at=None,
+                        dataset_summary=dataset_summary, outer_folds_expected=outer_folds_expected,
+                        inner_folds=inner_folds, repeats=repeats, seeds=seeds)
+        __atomic_write(manifest_path, manifest)
+
+        try:
+            yield manifest  # give caller a mutable reference
+        except Exception:
+            raise  # manifest already indicates unfinished status
+        else:
+            manifest['finished_at'] = __utc_now()
+            __atomic_write(manifest_path, manifest)
+
+    @staticmethod
+    def _count_unique_datasets(data: FeatureSet):
+        return len(np.unique(data.dataset)) if data.dataset is not None else 1
+
+
+class KFoldNestedCV(NestedCVBase):
+
+    def _get_outer_splitter(self, seed: int):
+        """Stratified group-aware k-kfold splitter."""
+        return StratifiedGroupKFold(**self.config.nested_cv.outer_cv.dict(), random_state=seed)
+
+    def _get_outer_groups(self, data: FeatureSet):
+        """Group by patient ID."""
+        return data.group
+
+
+class LODONestedCV(NestedCVBase):
+
+    def _get_outer_splitter(self, seed: int):
+        """Leave one dataset out splitting."""
+        return LeaveOneGroupOut()  # deterministic, no seed needed
+
+    def _get_outer_groups(self, data: FeatureSet):
+        """Group by datasets."""
+        return data.dataset
 
 
 if __name__ == '__main__':

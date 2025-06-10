@@ -11,7 +11,7 @@ __all__ = ['PipelineConfig', 'ModelConfig', 'DataConfig', 'NestedCVConfig',
 @dataclass
 class BaseConfig:
     """Base dataclass to load pipeline.yaml config file."""
-    T = TypeVar('T')
+    T = TypeVar('T', bound='BaseConfig')
 
     @classmethod
     def from_dict(cls: Type[T], data: Dict[str, Any]) -> T:
@@ -51,6 +51,9 @@ class BaseConfig:
 
     def dict(self) -> dict:
         return asdict(self)
+
+    def copy(self: T) -> T:
+        return type(self).from_dict(self.dict())
 
 
 @dataclass
@@ -98,7 +101,7 @@ class DataConfig(BaseConfig):
 
 
 @dataclass
-class CVConfig(BaseConfig):
+class CVConfig(BaseConfig):  # needs to be compatible with sklearn.model_selection.BaseCrossValidator kwargs
     n_splits: int
     shuffle: bool
 
@@ -124,6 +127,7 @@ class NestedCVConfig(BaseConfig):
     calib_plot_hist_bin_width: float
     default_experiment: ExperimentConfig
     log_night_eval: bool
+    stratify_by_dataset_if_pooled: bool
     load_path_cv_feature_rankings: Union[str, Path] = None
 
 
@@ -161,12 +165,3 @@ class ExternalTestConfig(BaseConfig):
     data: DataConfig
     log_night_eval: bool
     output_patient_csv: bool
-
-
-if __name__ == '__main__':
-    test_yaml = Path(__file__).parent.joinpath('pipeline.yaml')
-    config = PipelineConfig.from_yaml(test_yaml)
-    print(config.model)
-    print(config.model.dict())
-
-    print(config.final_model.experiments[0])

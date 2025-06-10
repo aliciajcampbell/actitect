@@ -17,7 +17,7 @@ plt.rcParams['font.weight'] = 'bold'
 plt.rcParams['axes.labelweight'] = 'bold'
 
 
-def draw_actigraphy_data(df: pd.DataFrame, _sleep_log: pd.DataFrame, raw_only: bool = False):
+def draw_actigraphy_data(df: pd.DataFrame, _sleep_log: pd.DataFrame = None, raw_only: bool = False):
     @dataclass
     class Colors:
         x: str = '#6200EE'

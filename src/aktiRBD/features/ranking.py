@@ -21,16 +21,15 @@ from aktiRBD.external.boruta_py.boruta import BorutaPy
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['fetch_or_compute_feat_ranks']
+__all__ = ['FeatureRanker']
 
-
-def fetch_or_compute_feat_ranks(data: FeatureSet, rank_path: Path, data_config: DataConfig, n_jobs: int,
+'''def fetch_or_compute_feat_ranks(data: FeatureSet, rank_path: Path, data_config: DataConfig, n_jobs: int,
                                 return_df: bool = False, draw_plots: bool = False):
     """ Fetches or computes feature rankings for either a fold or the full dataset.
     Parameters:
-        :param data: (FeatureSet ) if FeatureSet from Fold, full dataset will be processed, else fold-level rankings.
+        :param data: (FeatureSet) if FeatureSet from Fold, full dataset will be processed, else fold-level rankings.
         :param rank_path: (Path) pointing to the directory where ranking files are/or will be stored.
-        :param data_config: (DataConfig) instance containing data meta config.
+        :param data_config: (DataConfig) instance containing data meta-config.
         :param draw_plots: Boolean flag to indicate if plots should be drawn. Default is False.
         :param n_jobs: Number of jobs for parallel processing.
         :param return_df: Boolean flag to return a DataFrame instead of a dictionary.
@@ -50,7 +49,7 @@ def fetch_or_compute_feat_ranks(data: FeatureSet, rank_path: Path, data_config: 
         logger.info(f"found pre-computed ranking for {rank_path.stem} at {log_message_prefix}.")
         rank_df = pd.read_csv(ranking_file).set_index('total_rank')
     else:
-        logger.warning(f"no pre-computed ranking file found for {rank_path.stem} at {log_message_prefix},"
+        logger.warning(f"no pre-computed ranking file found for '{rank_path}' at {log_message_prefix},"
                        f" computation may take a while.")
 
         ranker = FeatureRanker(data, data_config, ranking_file.parent, n_jobs=n_jobs, draw_plot=draw_plots)
@@ -67,27 +66,29 @@ def fetch_or_compute_feat_ranks(data: FeatureSet, rank_path: Path, data_config: 
             name: {'idx': idx, 'rank': np.where(_feature_ranking == name)[0][0] + 1}
             for idx, name in enumerate(data.feat_map)
         }
+'''
 
 
 class FeatureRanker:
 
-    def __init__(self, data: FeatureSet, data_config: DataConfig, save_path: Path, n_jobs: int,
-                 draw_plot: bool = False, random_state: int = 42):
+    def __init__(self, root_dir: Path, data_config: DataConfig, n_jobs: int,
+                 draw_plots: bool = False, random_state: int = 42):
         """Class to run different feature ranking algorithms and produce an ensemble ranking to identify the best
         features.
         Parameters:
-            :param data: (FeatureSet) instance containing the data.
-            :param data_config: (DataConfig) instance containing meta info of the data.
-            :param save_path: (Path) defining the output directory.
+            :param data_config: (DataConfig) instance containing meta-info of the data.
+            :param root_dir: (Path) defining the root directory where ranking files are stored.
             :param n_jobs: (int) to handle parallel-processing.
-            :param draw_plot: (bool. default False) whether to draw a summary plot or not."""
+            :param draw_plots: (bool. default False) whether to draw a summary plot or not."""
 
-        self.data = data
+        self.data = None  # populate in entry point .fetch_or_compute()
         self.data_config = data_config
-        self.save_path = save_path
+        self.root_dir = root_dir
+        self.out_dir = None  # set dynamically in .fetch_or_compute() depending on cv or non-cv mode.
         self.n_jobs = n_jobs
-        self.draw_plot = draw_plot
+        self.draw_plots = draw_plots
         self.random_state = random_state
+        self.ranking_file_postfix = f"combined_rankings_{self.data_config.agg_level}.csv"
         self.method_dispatch = {
             'mrmr': self._run_mrmr,
             'boruta': self._run_boruta,
@@ -97,10 +98,49 @@ class FeatureRanker:
             'var': self._eval_variance
         }
 
-    def run(self, ranking_methods: List[Tuple] = None):
+    def fetch_or_compute(self, data: FeatureSet, return_df: bool = False) -> pd.DataFrame:
+        """ Fetches or computes feature rankings for either a fold or the full dataset.
+        Parameters:
+            :param data: (FeatureSet) containing the data. If not data.from_fold, full dataset will be processed,
+                else fold-level rankings.
+            :param return_df: Boolean flag to return a DataFrame instead of a dictionary.
+        Returns:
+            :return: Feature ranking as a DataFrame or dictionary. """
+        self.data = data
+        assert isinstance(self.data, FeatureSet), f"argument 'data' must be of type 'FeatureSet' ({type(FeatureSet)})"
+        _from_fold = getattr(self.data, 'from_fold', None)
+        if isinstance(_from_fold, dict):  # data is on fold-level
+            self.out_dir = self.root_dir.joinpath(f"fold_{_from_fold['k']}/{_from_fold['name']}")
+            log_message_prefix = f"fold {_from_fold['k']}"
+        else:  # data contains full dataset
+            self.out_dir = self.root_dir
+            log_message_prefix = "full training set"
+
+        ranking_file = self.out_dir.joinpath(self.ranking_file_postfix)
+        if ranking_file.exists():
+            logger.info(f"using pre-computed ranking for {self.root_dir.stem} at {log_message_prefix}.")
+            rank_df = pd.read_csv(ranking_file).set_index('total_rank')
+        else:
+            logger.warning(f"no pre-computed ranking file found for '{self.root_dir}' at {log_message_prefix},"
+                           f" computation may take a while.")
+            self.out_dir = utils.check_make_dir(self.out_dir, use_existing=True)
+            rank_df = self._run_ensemble()
+
+        if return_df:
+            rank_mapping_df = rank_df.reset_index()[['name', 'total_rank']]
+            rank_mapping_df['idx'] = rank_mapping_df['name'].map({name: idx for idx, name in enumerate(data.feat_map)})
+            rank_mapping_df = rank_mapping_df.set_index('idx').sort_index()
+            return rank_mapping_df
+        else:
+            _feature_ranking = rank_df.name.values  # df is sorted by rank
+            return {  # maps each feat. name to its idx in x and its rank in _feature_ranking
+                name: {'idx': idx, 'rank': np.where(_feature_ranking == name)[0][0] + 1}
+                for idx, name in enumerate(self.data.feat_map)}
+
+    def _run_ensemble(self, ranking_methods: List[Tuple] = None):
         """ Run the ensemble ranker to run the desired sub-functions and produce a wighted ensemble ranking.
         Parameters:
-            :param ranking_methods: (list(tuple)) defining which ranking methods to use and which weight is assign to
+            :param ranking_methods: (list(tuple)) defining which ranking methods to use and which weight is assigned to
             each. Available options are 'mrmr', 'boruta', 'corr_label', 'corr_inter', 'stat_sign', 'var'.
         Returns:
             :return: (pd.DataFrame) Containing ranks of each feature selection segment and a combined, weighted rank."""
@@ -128,25 +168,24 @@ class FeatureRanker:
         rank_df['diff_weight_mean'] = rank_df['weighted_mean'] - rank_df['mean_rank']
         rank_df['total_rank'] = stats.rankdata(rank_df['weighted_mean'], method='max')
         rank_df = rank_df.reset_index().sort_values(by='total_rank').set_index('total_rank')
-        rank_df.to_csv(self.save_path.joinpath(f"combined_rankings_{self.data_config.agg_level}.csv"))
+        rank_df.to_csv(self.out_dir.joinpath(self.ranking_file_postfix))
 
-        if self.draw_plot:
+        if self.draw_plots:
             fig = self._plot_feature_selection_summary(rank_df)
-            fig.savefig(self.save_path.joinpath(
-                f"combined_rankings_{self.data_config.agg_level}.png"), bbox_inches='tight')
+            fig.savefig(self.out_dir.joinpath(self.ranking_file_postfix.replace('.csv', '.png')), bbox_inches='tight')
             del fig
         del _weight_arr
         gc.collect()
         return rank_df
 
     def _run_boruta(self, proxy_model: str = 'rf', n_iterations: int = 10):
-        def _run_boruta_iteration(_data: FeatureSet, _model, iteration_seed: int):
+        def __run_boruta_iteration(_data: FeatureSet, _model, iteration_seed: int):
             boruta_selector = BorutaPy(
                 verbose=0,
                 estimator=_model,
                 n_estimators='auto',
                 perc=100,
-                alpha=0.05,  # how large the rejection/keep tail of polynomial should be (e.g 0.5%)
+                alpha=0.05,  # how large the rejection/keep tail of polynomial should be (e.g. 0.5%)
                 max_iter=1_000,  # number of iterations to perform, use more! (huge number+early_stopping?)
                 early_stopping=True,
                 n_iter_no_change=10,  # if early_stopping: patience (of confirming a tentative feature)
@@ -157,7 +196,7 @@ class FeatureRanker:
             return boruta_selector.ranking_, boruta_selector.importance_history_
 
         with utils.Timer() as _timer:
-            _save_path = utils.check_make_dir(self.save_path.joinpath('boruta/'), True)
+            _out_dir = utils.check_make_dir(self.out_dir.joinpath('boruta/'), True)
 
             n_hc_train, n_rbd_train = np.unique(self.data.y, return_counts=True)[1]
             model_setup = model_factory(proxy_model, cls_balance=n_hc_train / n_rbd_train, seed=self.random_state)
@@ -169,7 +208,7 @@ class FeatureRanker:
 
             with Parallel(n_jobs=self.n_jobs) as boruta_executor:
                 results = boruta_executor(
-                    delayed(_run_boruta_iteration)(self.data, model, self.random_state + iteration)
+                    delayed(__run_boruta_iteration)(self.data, model, self.random_state + iteration)
                     for iteration in range(n_iterations)
                 )
 
@@ -202,7 +241,7 @@ class FeatureRanker:
                 ('boruta_rank', 'mean'), ('boruta_rank', 'std'), ('boruta_rank', 'std/mean')
             ])
             ranking = ranking.sort_values(by='rank').set_index('rank')
-            ranking.to_csv(_save_path.joinpath(f"boruta_{self.data_config.agg_level}.csv"))
+            ranking.to_csv(_out_dir.joinpath(f"boruta_{self.data_config.agg_level}.csv"))
 
             del rank, boruta_rank_mean, boruta_rank_std, importance_mean, importance_std
             gc.collect()
@@ -210,21 +249,21 @@ class FeatureRanker:
             utils.dump_to_json({'proxy_model': proxy_model, 'platform': sys.platform,
                                 'random_state': self.random_state,
                                 'n_jobs': self.n_jobs, 'n_iterations': n_iterations, 'elapsed(s)': _timer()},
-                               _save_path.joinpath('setting.json'))
+                               _out_dir.joinpath('setting.json'))
 
         return {f"{self.data_config.agg_level}": ranking}
 
     def _run_mrmr(self):
 
         with utils.Timer() as timer:
-            _save_path = utils.check_make_dir(self.save_path.joinpath('mrmr/'), True)
+            _out_dir = utils.check_make_dir(self.out_dir.joinpath('mrmr/'), True)
 
             # check for constant features: (mrmr excludes them internally)
             constant_flags = np.apply_along_axis(lambda x: np.all(x == x[0]), 0, self.data.x)
             if constant_flags.any():
                 constant_idx = np.where(constant_flags == 1)[0]
                 _constant_dict = {self.data.feat_map[_idx]: self.data.x[0, _idx] for _idx in constant_idx}
-                utils.dump_to_json(_constant_dict, _save_path.joinpath(f"constant_features.json"))
+                utils.dump_to_json(_constant_dict, _out_dir.joinpath(f"constant_features.json"))
 
                 logger.info(f"found constant features: {_constant_dict}")
                 _feat_map = self.data.feat_map[~constant_flags]
@@ -282,7 +321,7 @@ class FeatureRanker:
                 })], ignore_index=True)
 
             ranking = ranking.sort_values(by='rank').set_index('rank')
-            ranking.to_csv(_save_path.joinpath(f"mrmr_{self.data_config.agg_level}.csv"))
+            ranking.to_csv(_out_dir.joinpath(f"mrmr_{self.data_config.agg_level}.csv"))
 
             del redundancy_matrix
             logger.info(f"applied MRMR. ({timer()}s)")
@@ -297,7 +336,7 @@ class FeatureRanker:
 
     def _eval_corr(self):
         with utils.Timer() as timer:
-            _save_path = utils.check_make_dir(self.save_path.joinpath('pca_corr/'), True)
+            _out_dir = utils.check_make_dir(self.out_dir.joinpath('pca_corr/'), True)
             _result_dict_label = {f"{self.data_config.agg_level}": None}
             _result_dict_inter = {f"{self.data_config.agg_level}": None}
 
@@ -310,7 +349,7 @@ class FeatureRanker:
             if constant_flags.any():
                 constant_idx = np.where(constant_flags == 1)[0]
                 _constant_dict = {self.data.feat_map[_idx]: self.data.x[0, _idx] for _idx in constant_idx}
-                utils.dump_to_json(_constant_dict, _save_path.joinpath(f"constant_features.json"))
+                utils.dump_to_json(_constant_dict, _out_dir.joinpath(f"constant_features.json"))
 
                 logger.info(f"found constant features: {_constant_dict}")
                 x_train_no_constants = self.data.x[:, ~constant_flags]
@@ -348,7 +387,7 @@ class FeatureRanker:
                 })], ignore_index=True)
 
             results_label = results_label.sort_values(by='rank').set_index('rank')
-            results_label.to_csv(_save_path.joinpath(f"label_corr_{self.data_config.agg_level}.csv"))
+            results_label.to_csv(_out_dir.joinpath(f"label_corr_{self.data_config.agg_level}.csv"))
             _result_dict_label.update({f"{self.data_config.agg_level}": results_label})
 
             # create ranking for inter-feature correlations: (mean over pearson, kendall, spearman)
@@ -378,7 +417,7 @@ class FeatureRanker:
                 })], ignore_index=True)
 
             results_inter = results_inter.sort_values(by='rank').set_index('rank')
-            results_inter.to_csv(_save_path.joinpath(f"inter_corr_{self.data_config.agg_level}.csv"))
+            results_inter.to_csv(_out_dir.joinpath(f"inter_corr_{self.data_config.agg_level}.csv"))
             _result_dict_inter.update({f"{self.data_config.agg_level}": results_inter})
 
             del results_label, results_inter, label_corr, inter_corr
@@ -388,7 +427,7 @@ class FeatureRanker:
 
     def _eval_variance(self):
         with utils.Timer() as timer:
-            _save_path = utils.check_make_dir(self.save_path.joinpath('statistics/'), True)
+            _out_dir = utils.check_make_dir(self.out_dir.joinpath('statistics/'), True)
 
             scaler = MinMaxScaler()
             x = scaler.fit_transform(self.data.x)
@@ -404,7 +443,7 @@ class FeatureRanker:
             ranking['med'] = med
             ranking['rank'] = stats.rankdata(-var, method='max')
             ranking = ranking.sort_values(by='rank').set_index('rank')
-            ranking.to_csv(_save_path.joinpath(f"variance_{self.data_config.agg_level}.csv"))
+            ranking.to_csv(_out_dir.joinpath(f"variance_{self.data_config.agg_level}.csv"))
 
             del var, rel_var, med, x
             logger.info(f" evaluated variance. ({timer()}s)")
@@ -433,7 +472,7 @@ class FeatureRanker:
             }
 
         with utils.Timer() as timer:
-            _save_path = utils.check_make_dir(self.save_path.joinpath('rbd_vs_hc/'), True)
+            _out_dir = utils.check_make_dir(self.out_dir.joinpath('rbd_vs_hc/'), True)
             ranking = pd.DataFrame()
             feature_info = [("local", [_feat for _feat in self.data.feat_map
                                        if _feat not in self.data_config.loader.included_global_features], 0), ]
@@ -475,7 +514,7 @@ class FeatureRanker:
             nan_ranks = ranking[ranking['rank'].isna()].index
             ranking.loc[nan_ranks, 'rank'] = len(ranking)
             ranking = ranking.sort_values(by='rank').set_index('rank')
-            ranking.to_csv(_save_path.joinpath(f"rbd_vs_hc_{self.data_config.agg_level}.csv"))
+            ranking.to_csv(_out_dir.joinpath(f"rbd_vs_hc_{self.data_config.agg_level}.csv"))
             logger.info(f" evaluated variance. ({timer()}s)")
 
         return {f"{self.data_config.agg_level}": ranking}
