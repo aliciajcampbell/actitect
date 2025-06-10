@@ -48,7 +48,6 @@ dependencies = [
   "biosppy>2.0.0,<2.2.3",  # depedency of pyhrv, with 2.2.3 peakutils missing
 
   # i/o
-  "openmovement==0.0.1",  # loading Axivity CWA data (todo: implement binary parser)
   "openpyxl==3.1.2",  # reading from excel files
   "PyYAML==6.0.1",  # loading configs
   "pyarrow==15.0.0",  # saving large dataframes

@@ -43,6 +43,7 @@ class LogRecord(ABC):
     @classmethod
     @abstractmethod
     def from_stream(cls, stream: BinaryIO) -> Optional['LogRecord']:
+        """Entry point to parse a LogRecord from a binary stream."""
         pass
 
 

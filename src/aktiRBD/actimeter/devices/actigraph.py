@@ -21,7 +21,7 @@ class ActiGraph(BaseDevice):  # noqa
     def __init__(self, path_to_gt3x: Path, patient_id: str, kwargs: dict = None):
         super().__init__(filepath=path_to_gt3x, patient_id=patient_id)
 
-        logger.warning("ActiGraph parser has not been fully validated yet. Use with caution.")
+        logger.warning("[NOQA]: ActiGraph parser has not been fully validated yet. Use with caution.")
 
         self.zip_file = ZipFile(path_to_gt3x, 'r')
         self.device_header = None
@@ -272,8 +272,7 @@ class ActiGraph(BaseDevice):  # noqa
                 scale = _bit_range / (rng_max - rng_min)  # 12‑bit ADC → 4096 counts
             scale = float(scale)
 
-        except (TypeError, ValueError):
-            # no scale information in header, fallback to nominal scale
+        except (TypeError, ValueError):  # no scale information in header, fallback to nominal scale
             logger.warning(f"(io: {self.meta['patient_id']}) could not determine scale factor from 'info.txt'. "
                            f"Using nominal scale factor of 256 LBS / g.")
             scale = 256

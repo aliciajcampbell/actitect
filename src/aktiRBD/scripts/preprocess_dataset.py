@@ -46,8 +46,9 @@ def _process_dataset(args: argparse.Namespace, processing_kwargs: dict, feature_
                     raise UserWarning(f"excluding {_rec_label} according to meta.")
                 else:
 
-                    file_processor = FileProcessor(_patient_id, _record_ID, _diagnosis, file_path, save_dir,
-                                                   save_processed_data=args.save_processed)
+                    file_processor = FileProcessor(
+                        _patient_id, _record_ID, _diagnosis, file_path, save_dir,
+                        save_processed_data=args.save_processed, ax6_legacy_mode=args.ax6_legacy_mode)
                     file_processor.process(feature_kwargs, processing_kwargs, args, pbar)
                     del file_processor
                     gc.collect()
@@ -137,6 +138,12 @@ def _parse_args():
     parser.add_argument(
         '-del', '--delete_processed_files', action='store_true', default=False,
         help='If used, will delete previously processed .parquet files to free up space. Requires confirmation.'
+    )
+
+    parser.add_argument(
+        '--ax6_legacy_mode', action='store_true', default=False,
+        help='Earlier Ax6 parsing code from Openmovement i used had some issues with duplicate timestamps and '
+             'checksums.Use this flag to reproduce this behavior.'
     )
 
     return parser.parse_args()

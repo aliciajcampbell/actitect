@@ -17,9 +17,8 @@ from aktiRBD.actimeter.basedevice import ResolveNwSleepParams
 from aktiRBD.features import CalcLocalMoveFeatures, CalcGlobalMoveFeatures
 from aktiRBD.utils.visualization import draw_actigraphy_data
 
-# todo: make relative to sampling rate!
-MIN_LOCAL_SAMPLE_LENGTH = 50  # = 0.5 seconds at 100Hz
-MAX_LOCAL_SAMPLE_LENGTH = 5_000  # = 50 seconds at 100Hz
+MIN_LOCAL_SAMPLE_LENGTH_SECONDS = 0.5
+MAX_LOCAL_SAMPLE_LENGTH_SECONDS = 50
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +29,7 @@ class FileProcessor:
     _delete_confirmation_given = False  # only relevant for 'delete_processed_files' operational modes
 
     def __init__(self, patient_id: str, record_id: str, label: str, acti_file_path: Path, save_dir: Path,
-                 save_processed_data: bool, sleep_log: pd.DataFrame = None):
+                 save_processed_data: bool, sleep_log: pd.DataFrame = None, ax6_legacy_mode: bool = False):
 
         self.patient_id = patient_id
         self.record_id = record_id if record_id and record_id != 'none' else None
@@ -39,6 +38,7 @@ class FileProcessor:
         self.acti_file_path = acti_file_path
         self.save_processed_data = save_processed_data
         self.sleep_log = sleep_log
+        self.ax6_legacy_mode = ax6_legacy_mode
 
         self.recording_save_dir = save_dir.joinpath(patient_id) if not self.record_id \
             else save_dir.joinpath(patient_id, self.record_id)
@@ -163,7 +163,10 @@ class FileProcessor:
                 logger.warning(f"(io: {self.saving_suffix}): processed data exists as .parquet file but will"
                                f" re-run processing due to operational args. Data will be overwritten "
                                f"if 'save_processed_data' is True ({self.save_processed_data}).")
-            actimeter = ActimeterFactory(self.acti_file_path, self.saving_suffix)
+            if self.ax6_legacy_mode:  # factory handles kwargs but this will mute the warning for other devices
+                actimeter = ActimeterFactory(self.acti_file_path, self.saving_suffix,  legacy_mode=self.ax6_legacy_mode)
+            else:
+                actimeter = ActimeterFactory(self.acti_file_path, self.saving_suffix)
             utils.check_make_dir(self.recording_save_dir, use_existing=True)
             processed_df = actimeter.process(**self.process_kwargs)
 
@@ -322,9 +325,10 @@ class FileProcessor:
                              _night_idx: int, _feature_names: np.ndarray, sample_rate: float):
 
         with utils.Timer() as local_timer:
-            if not (MIN_LOCAL_SAMPLE_LENGTH <= _move_bout_df.shape[0] <= MAX_LOCAL_SAMPLE_LENGTH):
-                logger.debug(
-                    f"timeseries too short/long: {_relevant_idx} "
+            if not (int(MIN_LOCAL_SAMPLE_LENGTH_SECONDS * sample_rate)
+                    <= _move_bout_df.shape[0]
+                    <= int(MAX_LOCAL_SAMPLE_LENGTH_SECONDS * sample_rate)):
+                logger.debug(f"timeseries too short/long: {_relevant_idx} "
                     f"({(_move_bout_df.index[-1] - _move_bout_df.index[0]).total_seconds():.3f}s)")
                 _local_feats = {_feat_name: np.NaN for _feat_name in _feature_names}
             else:  # calculate the movement features of each episode

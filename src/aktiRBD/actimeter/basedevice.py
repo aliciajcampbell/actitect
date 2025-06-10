@@ -77,6 +77,8 @@ class BaseDevice(ABC):
             :param header_only: (bool) if True, will only load the header from the binary, not the data.
         Returns:
             :return:  (pd.Dataframe): the raw data with columns 'x,'y', and 'z' (in units of g) """
+        assert Path(self.processing_info['loading']['filepath']).is_file(), \
+            f"(io: {self.meta['patient_id']}): File '{self.processing_info['loading']['filepath']}' not found."
         try:
             with utils.Timer() as load_timer:
                 raw_df, header = self._parse_binary_to_df(header_only=header_only)
