@@ -161,7 +161,7 @@ def eval_roc_and_pr_curves(y_true, y_prob, lvl: str, mode: str, eval_params: dic
         assert not missing_keys, f"'eval_params' is missing required keys: {missing_keys}"
         if eval_params.get('cv_mode'):
             assert 'n_interp_points_roc_pr' in list(eval_params.keys()), \
-                f" if 'cv_mode', 'eval_params' requires additional argument 'n_interp_points_roc_pr' of type int."
+                f"if 'cv_mode', 'eval_params' requires additional argument 'n_interp_points_roc_pr' of type int."
 
         _roc_mode = {'curve': 'roc', 'lvl': lvl}
         _fig_roc = draw_roc_or_pr_curve(_fpr, _tpr, _thresholds_roc, _roc_mode)

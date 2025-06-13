@@ -25,6 +25,7 @@ from aktiRBD.classifier.tools.evaluator import Evaluator
 from aktiRBD.classifier.tools.feature_set import FeatureSet, Fold
 from aktiRBD.classifier.tools.hp_optimizers import BayesianOptCV
 from aktiRBD.classifier.tools.metrics import calc_evaluation_metrics
+from aktiRBD.classifier.tools.probability_calibration import CustomCalibratedClassifierCV
 from aktiRBD.config import PipelineConfig
 from aktiRBD.utils import visualization
 
@@ -35,13 +36,15 @@ __all__ = ['KFoldNestedCV', 'LODONestedCV']
 
 class NestedCVBase(ABC):
 
-    def __init__(self, config: PipelineConfig, save_path: Path, early_stopping_options: list = None):
+    def __init__(self, config: PipelineConfig, save_path: Path, early_stopping_options: list = None,
+                 calibration: str = None):
         self.config = config
         self.save_path = save_path
         self.random_state = config.random_state
         self.n_jobs = config.nested_cv.n_jobs
         self.n_datasets, self.inner_seeds, self.n_repeats, self.outer_splits = None, None, None, None
 
+        self.calibration = calibration
         self.early_stopping_options = early_stopping_options if early_stopping_options is not None \
             else [True, False] if config.model.which == 'xgboost' else [False]
 
@@ -118,8 +121,8 @@ class NestedCVBase(ABC):
                 pbar.update(1)
                 current, peak = tracemalloc.get_traced_memory()
                 logger.info(f"repeat {repeat + 1}/{self.n_repeats}:"
-                            f" current memory usage: {current / 1024 / 1024:.2f} MB;"
-                            f" peak: {peak / 1024 / 1024:.2f} MB")
+                            f"current memory usage: {current / 1024 / 1024:.2f} MB;"
+                            f"peak: {peak / 1024 / 1024:.2f} MB")
 
                 tracemalloc.clear_traces()
 
@@ -183,8 +186,25 @@ class NestedCVBase(ABC):
                     opt_model.set_params(**{'early_stopping_rounds': None, 'eval_metric': None})  # reset
                     _suffix = 'no_early_stopping'
 
-                opt_model.fit(train_outer_top_k.x, train_outer_top_k.y, eval_set=_eval_set, verbose=False)
-                opt_model.set_params(**{'early_stopping_rounds': None, 'eval_metric': None})  # reset
+                if self.calibration:
+                    assert self.calibration in ['sigmoid', 'isotonic'], \
+                        f"calibration must be 'sigmoid' or 'isotonic' not '{self.calibration}'."
+
+                    _y_strat_outer_top_k = train_outer_top_k.get_strat_labels(
+                        self.config.nested_cv.stratify_by_dataset_if_pooled)
+                    _sgkf = StratifiedGroupKFold(**self.config.nested_cv.inner_cv.dict(), random_state=inner_seed)
+                    cv_splits = list(_sgkf.split(
+                        X=train_outer_top_k.x, y=_y_strat_outer_top_k, groups=train_outer_top_k.group))
+                    calibrated_cv = CustomCalibratedClassifierCV(
+                        estimator=opt_model, method=self.calibration, cv=cv_splits,
+                        pass_fold_as_eval_set=True, n_jobs=self.n_jobs)
+                    logger.info(f"Training model with {self.calibration} calibration.")
+                    opt_model = calibrated_cv.fit(
+                        train_outer_top_k.x, train_outer_top_k.y, groups=train_outer_top_k.group, verbose=False)
+                else:
+                    opt_model.fit(train_outer_top_k.x, train_outer_top_k.y, eval_set=_eval_set, verbose=False)
+                    opt_model.set_params(**{'early_stopping_rounds': None, 'eval_metric': None})  # reset
+
                 save_path_early_stopping = utils.check_make_dir(save_path_fold.joinpath(_suffix), True)
 
                 # predict probabilities and calculate thresholds

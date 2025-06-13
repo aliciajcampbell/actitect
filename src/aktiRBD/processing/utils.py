@@ -105,7 +105,7 @@ def _calculate_night_overlap_h(_start_time: pd.Timestamp, _end_time: pd.Timestam
     else:
         if column == 'sptw':
             logger.warning(f"segment with start={_start_time} and end={_end_time} spans over several days,"
-                           f" so it's likely misclassified.")
+                           f"so it's likely misclassified.")
     for possible_night in nights:
         overlap_start = max(_start_time, possible_night['start'])
         overlap_end = min(_end_time, possible_night['end'])
@@ -127,13 +127,13 @@ def handle_duplicate_timestamps(df: pd.DataFrame, remove_dupes: bool = True, **p
     if _n_dupes and remove_dupes:
         df = df[~df.index.duplicated(keep=False)]
         logger.info(f"(io: {print_info.get('patient_id')}) found {_n_dupes} duplicate timestamps."
-                    f" removing ~{_n_dupes / print_info.get('sample_rate')}s of data" if print_info
+                    f"removing ~{_n_dupes / print_info.get('sample_rate')}s of data" if print_info
                     else f"(io) found {_n_dupes} duplicate timestamps that will be removed.")
     elif _n_dupes and not remove_dupes:
         logger.warning(f"(io: {print_info.get('patient_id')})found {_n_dupes} duplicate timestamps."
-                       f" Set 'resolve_duplicates' to resolve."
+                       f"Set 'resolve_duplicates' to resolve."
                        if print_info else f"[WARN]: (io) found {_n_dupes} duplicate timestamps."
-                                          f" Set 'remove_dupes' to resolve.")
+                                          f"Set 'remove_dupes' to resolve.")
     else:
         logger.info(f"(io: {print_info.get('patient_id')}) no duplicate timestamps found." if print_info else
                     f"(io) no duplicate timestamps found.")

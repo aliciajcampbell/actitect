@@ -89,7 +89,7 @@ nested_cv:
     name: 'nested_cv'
     hp_setup_name:
     early_stopping:
-    calibration:
+    calibration: 'sigmoid'
     threshold: 'roc_dist'
     patient_aggregation: 'ensemble_major'
 
@@ -104,6 +104,7 @@ final_model:
       n_splits: 5
       shuffle: True
     bayes_params: { 'n_calls': 100, 'use_early_stopping': False, 'verbose': True }
+    stratify_by_dataset_if_pooled: True  # for bayes cv
     # 'early_stopping': {'early_stopping_rounds': 100, 'eval_metric': balanced_accuracy_eval},
     early_stopping: { 'early_stopping_rounds': 10, 'eval_metric': [ 'logloss' ] }
     load_path_feature_rankings: # leave empty for default!
@@ -124,7 +125,7 @@ final_model:
         patient_aggregation: 'ensemble_major'
 
     nested_cv_path: # leave empty for default!, otherwise must point to a nested_cv output dir.
-    include_pretrain_full: True # include mode where models are pretrained on concatenated cologne train+test cohort
+    include_pretrain_merged: True # include mode where models are pretrained on concatenated cologne train+test cohort
     save_path_models: # leave empty for default, can be a list for several locations
     calibration_cv:  # cv used for calibrating the model (if specified)
       n_splits: 5

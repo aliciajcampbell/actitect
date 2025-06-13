@@ -69,10 +69,10 @@ def _run_setup():
 
         assert (_args.root_dir.is_dir() and _args.root_dir.joinpath('data').is_dir() and
                 _args.root_dir.joinpath('aktiRBD').is_dir()), \
-            (f" '--root_dir' ('-r') ({_args.root_dir}) is not a dir "
+            (f"'--root_dir' ('-r') ({_args.root_dir}) is not a dir "
              f"or does not contain sub-dirs './data' and './aktiRBD'")
         assert _args.config_file.is_file(), \
-            f" '--config_file' (-'c') is not a file. ({_args.config_file})"
+            f"'--config_file' (-'c') is not a file. ({_args.config_file})"
 
         return _args
 
@@ -111,8 +111,7 @@ def _run_setup():
             config.final_model.load_path_feature_rankings = Path(config.final_model.load_path_feature_rankings)
 
         if not config.final_model.nested_cv_path:
-            config.final_model.nested_cv_path = root_save_path.joinpath(
-                'nested_cv')  # todo: for pooled training, we need to overwrite this by either k-fold or lodo path right? (final model training needs acces to cv dir)
+            config.final_model.nested_cv_path = root_save_path.joinpath('nested_cv')
         else:
             config.final_model.nested_cv_path = Path(config.final_model.nested_cv_path)
 

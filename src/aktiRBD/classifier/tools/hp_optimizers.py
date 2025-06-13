@@ -9,6 +9,10 @@ from aktiRBD.classifier.models import ModelSetup
 from aktiRBD.classifier.tools.cross_validation import perform_stratified_group_cv
 from aktiRBD.utils import custom_tqdm
 
+import warnings
+import logging
+from scipy.optimize.linesearch import LineSearchWarning
+
 logger = logging.getLogger(__name__)
 
 __all__ = ['BruteForceGridSearchCV', 'RandomGridSearchCV', 'BayesianOptCV']
@@ -152,11 +156,11 @@ class BayesianOptCV:
         assert len(_inv_params) == 0, f"not all argument names are valid for {self.model} API. not valid: {_inv_params}"
 
     @staticmethod
-    def _objective(_x, _y, _y_strat,  _model, _params, _fixed_params, _cv_params, _score_weights, _use_early_stopping,
+    def _objective(_x, _y, _y_strat, _model, _params, _fixed_params, _cv_params, _score_weights, _use_early_stopping,
                    _seed, _n_jobs):
         _params.update(_fixed_params)
         _model.set_params(**_params)
-        _cv_results = perform_stratified_group_cv(_model, _x, _y, _y_strat,  **_cv_params,
+        _cv_results = perform_stratified_group_cv(_model, _x, _y, _y_strat, **_cv_params,
                                                   use_early_stopping=_use_early_stopping,
                                                   random_seed_splitting=_seed, n_jobs=_n_jobs)
 
@@ -167,24 +171,16 @@ class BayesianOptCV:
 
     def fit(self, x, y, y_strat, cv_params, n_calls: int, use_early_stopping: bool, n_jobs: int, verbose: bool = True):
         def objective(params):
-            param_dict = {dim.name: param for dim, param in zip(self.param_space, params)}
-            top_k = param_dict.pop('top_k_feats')
-            _top_k_feat_idcs = [val['idx'] for val in self.feature_map.values() if val['rank'] <= top_k]
-            x_top_k = x[:, _top_k_feat_idcs]
-            return self._objective(
-                x_top_k, y, y_strat,
-                self.model,
-                param_dict,
-                self.fixed_params,
-                cv_params,
-                self.cv_score_weights,
-                use_early_stopping,
-                _seed=self.seed,
-                _n_jobs=n_jobs
-            )
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=LineSearchWarning)
+                param_dict = {dim.name: param for dim, param in zip(self.param_space, params)}
+                top_k = param_dict.pop('top_k_feats')
+                _top_k_feat_idcs = [val['idx'] for val in self.feature_map.values() if val['rank'] <= top_k]
+                x_top_k = x[:, _top_k_feat_idcs]
+                return self._objective(x_top_k, y, y_strat, self.model, param_dict, self.fixed_params, cv_params,
+                                       self.cv_score_weights, use_early_stopping, _seed=self.seed, _n_jobs=n_jobs)
 
         optimizer_kwargs = {
-
             'n_calls': n_calls,  # (int, 100)
             'base_estimator': None,  # (Estimator, GaussianProcessRegressor) surrogate for gp optimizer
             'n_random_starts': 100,  # (int, 10) N of random inits before optimization
@@ -206,11 +202,12 @@ class BayesianOptCV:
         if verbose:
             logger.info(f"performing bayes optimization with n_calls={n_calls} and early_stopping={use_early_stopping}")
 
-        with custom_tqdm(total=n_calls, disable=(not verbose)) as pbar:
+        with custom_tqdm(total=n_calls, disable=(not verbose)) as pbar, warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=LineSearchWarning)
             pbar.set_description(f"[PROGRESS]: Bayesian optimization")
             _best_score = 0
 
-            def _pbar_callback(_results):  # todo: add some other info from result to pbar?
+            def _pbar_callback(_results):
                 nonlocal _best_score
                 _score = -_results.fun
                 if _score > _best_score:
@@ -219,9 +216,6 @@ class BayesianOptCV:
                 pbar.update(1)
 
             result = gp_minimize(
-                func=objective,
-                dimensions=self.param_space,
-                callback=_pbar_callback,
-                **optimizer_kwargs,
-            )
+                func=objective, dimensions=self.param_space, callback=_pbar_callback, **optimizer_kwargs)
+
         return result

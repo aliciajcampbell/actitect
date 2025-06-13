@@ -44,7 +44,6 @@ after this , the output should look like
 ```
 ... 
 2025-03-10 17:11:22 [INFO] Verifying package installation...
-2025-03-10 17:11:22 [INFO] Quality-control check passed: aktiRBD imported successfully!
 2025-03-10 17:11:22 [INFO] Installation successful!
 ```
 

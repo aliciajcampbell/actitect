@@ -23,7 +23,7 @@ class TestPipeline(BasePipeline):
         # load the data
         _, test, __ = self._load_data()
         if _.x.shape[0] > 0:
-            logger.warning(f" training set in external test mode has {_.x.shape[0]} assigned samples.")
+            logger.warning(f"training set in external test mode has {_.x.shape[0]} assigned samples.")
 
         for _path_models in self.config.pretrained_model_dirs:
             # assert _

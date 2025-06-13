@@ -188,22 +188,22 @@ class BaseDevice(ABC):
                         f"fs = {_raw_fs} ± {self.processing_info['resampling']['raw_fs_std']} Hz")
             if not _resample_rate:
                 logger.info(f"(resampling: {self.meta['patient_id']}) uniform resampling is recommended."
-                            f" Please specify an int target rate or use 'infer'.")
+                            f"Please specify an int target rate or use 'infer'.")
             else:  # uniform resampling rate -> perform resampling
                 _apply_resampling = True
 
         else:  # raw data already has uniform fs
             logger.info(f"(resampling: {self.meta['patient_id']}) raw data already has uniform sampling rate:"
-                        f" fs = {self.processing_info['resampling']['raw_fs_mean']} "
+                        f"fs = {self.processing_info['resampling']['raw_fs_mean']} "
                         f"± {self.processing_info['resampling']['raw_fs_std']} Hz")
 
             if not (_resample_rate is None or _resample_rate == 'infer'):  # check if target rate is specified
                 logger.info(f"(resampling: {self.meta['patient_id']}) raw data already has uniform sampling rate:"
-                            f" fs = {_raw_fs_is_uniform} ± {self.processing_info['resampling']['raw_fs_std']} Hz.")
+                            f"fs = {_raw_fs_is_uniform} ± {self.processing_info['resampling']['raw_fs_std']} Hz.")
 
                 if np.isclose(_raw_fs, _resample_rate, rtol=1e-5, atol=1e-8):  # raw fs matches target
                     logger.info(f"(resampling: {self.meta['patient_id']}) raw sample rate already matches specified"
-                                f" target ({_resample_rate} Hz). Skipping resampling.")
+                                f"target ({_resample_rate} Hz). Skipping resampling.")
                 else:  # data is uniform but should be resampled to different frequency
                     _apply_resampling = True
 
@@ -214,7 +214,7 @@ class BaseDevice(ABC):
             if not (np.isclose(_mean_fs, target_fs, rtol=1e-5, atol=1e-8) or _is_uniform):
                 _status = (f"error: resampling rate ({_mean_fs:.2f} Hz does not match target ({target_fs:.2f} Hz))"
                            f"or is not uniform (std = {_std_fs} Hz).")
-                raise ValueError(f" Resampling failed: {_status}")
+                raise ValueError(f"Resampling failed: {_status}")
 
             self.processing_info['resampling'].update(
                 {'resample_fs_is_uniform': _is_uniform, 'resample_fs_mean': _mean_fs,
@@ -255,8 +255,8 @@ class BaseDevice(ABC):
         processing.assert_valid_df(x_df)
 
         logger.info(f"(non-wear: {self.meta['patient_id']}) wear-time-segmentation summary:"
-                    f" wear={_info['total_wear_time(d)']:.2f}d, non-wear={_info['non_wear_time(d)']:.2f}d"
-                    f" ({_info['num_non_wear_episodes']} episodes)")
+                    f"wear={_info['total_wear_time(d)']:.2f}d, non-wear={_info['non_wear_time(d)']:.2f}d"
+                    f"({_info['num_non_wear_episodes']} episodes)")
         self.processing_info['non-wear'].update(_info)
 
         return x_df
@@ -273,14 +273,14 @@ class BaseDevice(ABC):
         _durations_h = np.array([sptw.get('duration(h)', np.nan) for sptw in _info['sptws'].values()])
         _durations_above_5h = _durations_h[np.where(_durations_h > 5)]
         logger.info(f"(sleep-segmentation: {self.meta['patient_id']}) sleep-segmentation summary:"
-                    f" found n={len(_durations_h):.0f} sptws with n={len(_durations_above_5h):.0f} above 5h with "
+                    f"found n={len(_durations_h):.0f} sptws with n={len(_durations_above_5h):.0f} above 5h with "
                     f"durations {np.nanmean(_durations_above_5h):.1f}±{np.nanstd(_durations_above_5h):.1f}h")
         processing.assert_valid_df(x_df)
         if 'wear' in x_df.columns:
             x_df, (_init_num_amb, _final_num_amb) = self._resolve_nonwear_sleep(x_df, _sptw, self.resolve_nw_params)
             if _init_num_amb:
                 logger.info(f"(sleep: {self.meta['patient_id']})found non-wear/sleep ambiguities,"
-                            f" resolved {_init_num_amb} -> {_final_num_amb}")
+                            f"resolved {_init_num_amb} -> {_final_num_amb}")
                 self.processing_info['sleep_nonwear_ambiguities'].update({'num_init_segments': _init_num_amb,
                                                                           'num_final_segments': _final_num_amb})
         else:

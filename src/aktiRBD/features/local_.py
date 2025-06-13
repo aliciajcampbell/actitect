@@ -174,7 +174,7 @@ def spectral_features(magnitude, n_dom_freqs: int, target_frequencies_hz: list, 
         })
 
     except ValueError as value_error:  # timeseries too short
-        logger.warning(f" Timeseries too short. (ValueError: {value_error} in spectral_features.)")
+        logger.warning(f"Timeseries too short. (ValueError: {value_error} in spectral_features.)")
         spectral_feats.update({f"asd_{f}": np.NaN for f in target_frequencies_hz})
         spectral_feats.update({f"f{i + 1}": np.NaN for i in range(n_dom_freqs)})
         spectral_feats.update({f"p{i + 1}": np.NaN for i in range(n_dom_freqs)})
@@ -342,7 +342,7 @@ def non_linear_dynamic_features(magnitude, x, y, z, emb_dim: int):
                 })
 
         except ValueError as value_error:  # timeseries too short
-            logger.warning(f" Timeseries too short. (ValueError: {value_error} in nold.)")
+            logger.warning(f"Timeseries too short. (ValueError: {value_error} in nold.)")
             non_lin_feats.update({
                 f"SampEn_{name}": np.NaN,
                 # f"corr_dim_{name}": np.NaN,

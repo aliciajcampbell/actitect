@@ -211,14 +211,14 @@ class FeatureSet:
                         value = getattr(scaler, attr)
                         if isinstance(value, (list, np.ndarray, float, int)):
                             scaler_info[attr] = value
-                logger.info(f" fitted and applied {scaler_info.get('name')} scaler.")
+                logger.info(f"fitted and applied {scaler_info.get('name')} scaler.")
 
             else:  # apply fitted scaler
                 for attr, value in scaler_info.items():  # set the scalers internal attributes to mimic a fitted state
                     if attr.endswith("_"):  # indicating fitted params
                         setattr(scaler, attr, np.array(value))
                 self.x = scaler.transform(self.x)
-                logger.info(f" applying pre-fitted {scaler_info.get('name')} scaler.")
+                logger.info(f"applying pre-fitted {scaler_info.get('name')} scaler.")
 
         self.process_params['scaler'] = scaler_info
 

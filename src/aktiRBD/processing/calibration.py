@@ -60,7 +60,7 @@ def van_hees_sphere_calibration(data: pd.DataFrame, clb_params=CalibParams()):
         info['calib_ok'] = 0
         info['calib_error_before(mg)'], info['calib_error_before(mg)'] = np.nan, np.nan
         logger.warning(f"skipping calibration: insufficient number of stationary samples found:"
-                       f" {len(sphere)} < {clb_params.min_num_stat_samples}")
+                       f"{len(sphere)} < {clb_params.min_num_stat_samples}")
         return data, info
 
     offset = np.array([0.0, 0.0, 0.0], dtype=sphere.dtype)

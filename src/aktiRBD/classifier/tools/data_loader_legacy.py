@@ -272,7 +272,7 @@ class DataLoader:
             if not problematic_counts.empty:
                 log_message = ", ".join([f"{problem}: {count}" for problem, count in problematic_counts.items()])
                 logger.info(f"found problematic values in '{df_log_name}' dataframe: {log_message}."
-                            f" Using drop={drop}, replace={replace}")
+                            f"Using drop={drop}, replace={replace}")
             else:
                 logger.info(f"found no problematic values in '{df_log_name}' dataframe")
 
@@ -339,14 +339,14 @@ class DataLoader:
         logger.info(
             f"train/test split:\n"
             f"\t\t - train: n = {n_rbd_train + n_hc_train:2.0f},"
-            f" rbd = {n_rbd_train:2.0f} "
+            f"rbd = {n_rbd_train:2.0f} "
             f"({n_rbd_train / (n_rbd_train + n_hc_train) * 100 if n_rbd_train + n_hc_train != 0 else 0:4.1f}%)"
-            f"  hc = {n_hc_train:2.0f} "
+            f" hc = {n_hc_train:2.0f} "
             f"({n_hc_train / (n_rbd_train + n_hc_train) * 100 if n_rbd_train + n_hc_train != 0 else 0:4.1f}%)\n"
             f"\t\t - test:  n = {n_rbd_test + n_hc_test:2.0f},"
-            f" rbd = {n_rbd_test:2.0f} "
+            f"rbd = {n_rbd_test:2.0f} "
             f"({n_rbd_test / (n_rbd_test + n_hc_test) * 100 if n_rbd_test + n_hc_test != 0 else 0:4.1f}%)"
-            f"  hc = {n_hc_test:2.0f} "
+            f" hc = {n_hc_test:2.0f} "
             f"({n_hc_test / (n_rbd_test + n_hc_test) * 100 if n_rbd_test + n_hc_test != 0 else 0:4.1f}%)"
         )
 

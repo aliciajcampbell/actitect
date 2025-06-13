@@ -44,9 +44,9 @@ class NestedCV:
 
     def __str__(self):
         return (f"NestedCV(repeats={self.n_repeats},"
-                f" outer_folds={self.config.nested_cv.outer_cv.n_splits},"
-                f" inner_folds={self.config.nested_cv.inner_cv.n_splits},"
-                f" n_jobs={self.n_jobs}, random_state={self.random_state})")
+                f"outer_folds={self.config.nested_cv.outer_cv.n_splits},"
+                f"inner_folds={self.config.nested_cv.inner_cv.n_splits},"
+                f"n_jobs={self.n_jobs}, random_state={self.random_state})")
 
     def fit(self, data: FeatureSet):
         with utils.custom_tqdm(total=self.n_repeats) as pbar:
@@ -77,8 +77,8 @@ class NestedCV:
                 pbar.update(1)
                 current, peak = tracemalloc.get_traced_memory()
                 logger.info(f"repeat {repeat + 1}/{self.n_repeats}:"
-                            f" current memory usage: {current / 1024 / 1024:.2f} MB;"
-                            f" peak: {peak / 1024 / 1024:.2f} MB")
+                            f"current memory usage: {current / 1024 / 1024:.2f} MB;"
+                            f"peak: {peak / 1024 / 1024:.2f} MB")
                 tracemalloc.clear_traces()
 
             tracemalloc.stop()
@@ -98,7 +98,7 @@ class NestedCV:
             # fit and eval non-optimized model:
             default_model = model_setup.model().set_params(**model_setup.default_params)
             _default_scores = self._fit_and_eval_model(default_model, train_outer, valid_outer)
-            logger.info(f" default model outer fold {k_outer}: {utils.fmt_dict(_default_scores['valid'])}")
+            logger.info(f"default model outer fold {k_outer}: {utils.fmt_dict(_default_scores['valid'])}")
             utils.dump_to_json(_default_scores, save_path_fold.joinpath(f"default_model_scores.json"))
             del _default_scores
 

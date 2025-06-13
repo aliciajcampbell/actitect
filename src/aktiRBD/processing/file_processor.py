@@ -100,7 +100,7 @@ class FileProcessor:
             del local_feat_df, global_feat_df, selected_nights
         else:
             logger.info(f"(io: {self.saving_suffix}): Skipping feature extraction."
-                        f" ('args.skip_feature_calc'={operational_kwargs.skip_feature_calc})")
+                        f"('args.skip_feature_calc'={operational_kwargs.skip_feature_calc})")
 
         # 3. plotting (if specified)
         if operational_kwargs.create_plots:
@@ -141,7 +141,7 @@ class FileProcessor:
                 logger.error(f"({self.saving_suffix}) failed to delete {self.parquet_path}: {e}")
         else:
             logger.warning(f"cannot delete {self.parquet_path} as the following derived files are missing:"
-                           f" {missing_files}. Skipping deletion.")
+                           f"{missing_files}. Skipping deletion.")
 
     @property
     def has_been_processed(self):
@@ -161,7 +161,7 @@ class FileProcessor:
         else:  # otherwise, run processing from raw data
             if self.has_been_processed and redo_processing:
                 logger.warning(f"(io: {self.saving_suffix}): processed data exists as .parquet file but will"
-                               f" re-run processing due to operational args. Data will be overwritten "
+                               f"re-run processing due to operational args. Data will be overwritten "
                                f"if 'save_processed_data' is True ({self.save_processed_data}).")
             if self.ax6_legacy_mode:  # factory handles kwargs but this will mute the warning for other devices
                 actimeter = ActimeterFactory(self.acti_file_path, self.saving_suffix,  legacy_mode=self.ax6_legacy_mode)
@@ -242,7 +242,7 @@ class FileProcessor:
 
             if not len(move_bout_ids_night) > 10:
                 logger.warning(f"not enough movement episodes found in {self.saving_suffix} night {night_idx}"
-                               f" (n={len(move_bout_ids_night)}). Check for non-wear.")
+                               f"(n={len(move_bout_ids_night)}). Check for non-wear.")
 
             else:
                 if self.feat_kwargs['mode'] == 'per_night':  # calc. global (per-night) features
@@ -268,7 +268,7 @@ class FileProcessor:
                     local_feat_df = pd.concat([local_feat_df, pd.DataFrame(local_feats, index=[idx]).astype(object)])
                     if self.pbar:
                         self.pbar.set_postfix({"file": f"{self.saving_suffix}",
-                                               "night": f" {night_idx + 1}/{_selected_nights.shape[0]} ",
+                                               "night": f"{night_idx + 1}/{_selected_nights.shape[0]} ",
                                                "features": f"{np.round((idx / len(move_bout_ids_night)) * 100, 1)}%"})
                     del local_feats
                     del move_bout_df
@@ -381,7 +381,7 @@ class FileProcessor:
             if header_fs != data_fs:
                 logger.warning(f"(io: {self.saving_suffix}) Device header sample rate ({header_fs} Hz) "
                     f"differs from data sample rate ({data_fs} Hz)."
-                               f" Consider activating resampling in the processing pipeline.")
+                               f"Consider activating resampling in the processing pipeline.")
             return data_fs
 
     @staticmethod

@@ -279,11 +279,11 @@ class AxivityAx6(BaseDevice):
                 if data_span_days > ax6_logging_threshold_d:  # trim it using 'loggingStartTime'
                     df = df[df.index >= logging_start_time]
                     logger.info(f"(io: {self.meta['patient_id']}) using 'loggingStartTime'"
-                                f" ({pd.Timestamp(header['loggingStartTime'])}) to trim raw data.")
+                                f"({pd.Timestamp(header['loggingStartTime'])}) to trim raw data.")
         else:
             if ax6_logging_threshold_d and not header_only:
                 logger.warning(f"(io: {self.meta['patient_id']}) 'loggingStartTime' not found in header;"
-                               f" cannot apply logging start time cutoff.")
+                               f"cannot apply logging start time cutoff.")
 
         return df, header
 

@@ -81,7 +81,7 @@ class CalcLocalMoveFeatures:
     def per_night_version(self, acc_mag, acc_x, acc_y, acc_z):
         for prop in (acc_mag, acc_x, acc_y, acc_z):
             assert isinstance(prop, pd.Series) or isinstance(prop, np.ndarray), \
-                f" input must be of type pd.Series or np.array, not {type(prop)}"
+                f"input must be of type pd.Series or np.array, not {type(prop)}"
 
         feature_calls = {
             'moments': dict(func=local_functions.moment_features, args=(acc_mag, acc_x, acc_y, acc_z), kwargs={}),
@@ -153,7 +153,7 @@ class CalcGlobalMoveFeatures:
             ax.axvspan(1 - self.setup.CLUSTER_SLEEP_WAKE_TOLERANCE, 1, color='r', alpha=.2, zorder=0,
                        label='excluded sleep on/offset')
             ax.plot(-1, 0, c='b', lw=2, label=f"n_peaks={cluster_feats['kde_n_peaks']}"
-                                              f" (prom. > {self.setup.CLUSTER_PEAK_KWARGS_KDE['prominence']})")
+                                              f"(prom. > {self.setup.CLUSTER_PEAK_KWARGS_KDE['prominence']})")
             for _xp in x_peaks:
                 ax.axvline(_xp, c='b', lw=.7, alpha=.5)
             ax.fill_between(density_x, density_y, color='gray', alpha=.2)

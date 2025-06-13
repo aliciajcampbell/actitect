@@ -42,7 +42,7 @@ class TrainPipeline(BasePipeline):
     def _run_pretrain(self, train: FeatureSet, test: FeatureSet):
         _save_path_pretrain = utils.check_make_dir(self.save_path.joinpath('pretrain_hps'), True)
         model_manager_pretrain = ModelManager(self.config, _save_path_pretrain)
-        model_manager_pretrain.pretrain(train.copy(), test.copy())
+        model_manager_pretrain.pretrain(train.copy(), test.copy(), dataset_save_tag='cgn')
 
     def _run_eval(self, test: FeatureSet):
         _save_path_test_cgn = utils.check_make_dir(self.save_path.joinpath('test_cgn'), True)

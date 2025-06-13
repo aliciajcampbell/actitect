@@ -22,7 +22,6 @@ import scipy.stats as stats
 import yaml
 from colorama import Fore, Style
 from colorama import init as colorama_init
-from openmovement.load import CwaData
 from skopt.space import Dimension
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
@@ -48,7 +47,6 @@ __all__ = [
     'load_yaml_file',
     'map_log_level',
     'combine_diary_times',
-    'load_cwa_to_df',
     'standardize_sleep_diary',
     'extract_CGN_ID_from_path',
     'check_make_dir',
@@ -218,7 +216,7 @@ def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False, verbose: bool 
             group['record_ID'] = [f"rec{i + 1}" for i in range(group.shape[0])]  # auto-complete record_IDs
         elif group['record_ID'].isna().any():  # some exist, but not all
             logger.warning(f"`record_ID` values are only partially defined for ID={ID_value}."
-                           f" Using auto-completion for missing values. ")
+                           f"Using auto-completion for missing values. ")
             existing_ids = set(group['record_ID'].dropna())  # keep defined IDs
             new_ids = [f"rec{i + 1}" for i in range(1, group.shape[0] + 1) if f"rec{i + 1}" not in existing_ids]
             group.loc[group['record_ID'].isna(), 'record_ID'] = new_ids[:group['record_ID'].isna().sum()]
@@ -239,23 +237,7 @@ def load_yaml_file(path):
             _cfg = yaml.safe_load(stream)
             return _cfg
         except yaml.YAMLError as exc:
-            logger.error(f" (io): error ({exc}) encountered while loading config {path}")
-
-
-def load_cwa_to_df(file_path):
-    """
-    loads the actiwatch accelerometer as df.
-    :param file_path:
-    :return: pandas.df with columns ['time', 'accel_x', 'accel_y', 'accel_z', 'light', 'temperature']
-    """
-    with CwaData(
-            file_path,
-            include_gyro=True, include_temperature=True,
-            include_light=True, include_mag=True,
-            include_time=True, include_accel=True,
-    ) as cwa_data:
-        df = cwa_data.get_samples()
-        return df
+            logger.error(f"(io): error ({exc}) encountered while loading config {path}")
 
 
 def map_log_level(log_level_key: str):
@@ -346,11 +328,11 @@ def extract_time(timestamp):
     elif pd.isna(timestamp):
         return None
     else:
-        logger.warning(f" unexpected dtype encountered in 'convert_to_datetime': {timestamp} of {timestamp.dtype}")
+        logger.warning(f"unexpected dtype encountered in 'convert_to_datetime': {timestamp} of {timestamp.dtype}")
         try:
             return pd.to_datetime(timestamp).time()
         except:
-            raise ValueError(f" Unknown value in 'convert_to_time', check excel formatting.")
+            raise ValueError(f"Unknown value in 'convert_to_time', check excel formatting.")
 
 
 def extract_CGN_ID_from_path(file_path: Union[str, Path], reg_ex=('RBD', 'HC-RBD')):
@@ -368,7 +350,7 @@ def extract_CGN_ID_from_path(file_path: Union[str, Path], reg_ex=('RBD', 'HC-RBD
         _cls = match.group(0)
         return _cls + _num
     else:
-        raise UserWarning(f" no reg_ex found in {file_path}.")
+        raise UserWarning(f"no reg_ex found in {file_path}.")
 
 
 def check_make_dir(dir_path: Path, use_existing=False, verbose=True, time_extension: bool = True):
@@ -403,7 +385,7 @@ def check_make_dir(dir_path: Path, use_existing=False, verbose=True, time_extens
         if use_existing:
             if verbose:
                 logger.info(f"(io): dir '{dir_path}' exists and will be used."
-                            f" Set 'use_existing' to False, to create new dir to avoid potential overwriting.")
+                            f"Set 'use_existing' to False, to create new dir to avoid potential overwriting.")
             return dir_path
 
         else:
@@ -475,7 +457,7 @@ def dict_minus_key(in_dict, keys_to_remove):
 
 
 def warning_handler(message, category, filename, lineno, file=None, line=None):
-    warning_msg = f" Warning in {filename}, line {lineno}: {category.__name__}: {message}"
+    warning_msg = f"Warning in {filename}, line {lineno}: {category.__name__}: {message}"
     logger.warning(warning_msg)
 
 
@@ -815,7 +797,7 @@ def list_subdirectories(base_path: Path, depth: int, stop_names: set = None):
 
 def compute_pearson_ci(r: float, n: int, confidence_level: float = .95):
     """Compute confidence interval for Pearson correlation using Fisher z-transform."""
-    assert n >= 10, f" must have at least 10 samples to estimate Fisher z-transform, got {n}."
+    assert n >= 10, f"must have at least 10 samples to estimate Fisher z-transform, got {n}."
 
     z = np.arctanh(r)  # Fisher z-transform
     se = 1 / np.sqrt(n - 3)  # standard error

@@ -80,7 +80,7 @@ def perform_stratified_group_cv(
         logger.info(
             f"cross-validation settings: k = {n_folds} "
             f"-> average train = {n_train_split} ({n_train_split / x_train.shape[0] * 100:.1f} %)"
-            f" validation = {n_val_split} ({n_val_split / x_train.shape[0] * 100:.1f} %)"
+            f"validation = {n_val_split} ({n_val_split / x_train.shape[0] * 100:.1f} %)"
         )
 
     _methods = ['default_thresh', 'roc_thresh']
@@ -154,12 +154,12 @@ def perform_stratified_group_cv(
             n_hc_valid, n_rbd_valid = np.unique(y_valid_fold, return_counts=True)[1]
             valid_total = n_rbd_valid + n_hc_valid
             print('\n\n')
-            print(f" fold: {k}")
-            print(f" train: RBD={n_rbd_train} ({n_rbd_train / train_total * 100:.1f}%)"
-                  f" HC={n_hc_train} ({n_hc_train / train_total * 100:.1f}%)")
+            print(f"fold: {k}")
+            print(f"train: RBD={n_rbd_train} ({n_rbd_train / train_total * 100:.1f}%)"
+                  f"HC={n_hc_train} ({n_hc_train / train_total * 100:.1f}%)")
             print(f"train ids: {np.unique(group_train)}")
-            print(f" valid: RBD={n_rbd_valid} ({n_rbd_valid / valid_total * 100:.1f}%)"
-                  f" HC={n_hc_valid} ({n_hc_valid / valid_total * 100:.1f}%)")
+            print(f"valid: RBD={n_rbd_valid} ({n_rbd_valid / valid_total * 100:.1f}%)"
+                  f"HC={n_hc_valid} ({n_hc_valid / valid_total * 100:.1f}%)")
             print(f"valid ids: {np.unique(group_valid)}")
 
         if use_early_stopping:
@@ -228,7 +228,7 @@ def perform_stratified_group_cv(
                                    'pred(ensemble_major)', 'pred(ensemble_all)'):
                     _misclassified_patients = _per_patient_valid[
                         _per_patient_valid['ground_truth'] != _per_patient_valid[_pred_name]].id.values
-                    local_misclassified_patients_per_fold.update({f" fold {k}": _misclassified_patients})
+                    local_misclassified_patients_per_fold.update({f"fold {k}": _misclassified_patients})
 
                     _per_patient_pred_valid = _per_patient_valid[_pred_name]
                     local_scoring_history_per_patient = _update_scoring_history(local_scoring_history_per_patient,
@@ -283,7 +283,7 @@ def perform_stratified_group_cv(
         for method, scores in scoring['night'].items():
             logger.info(f'Cross-validation results for {method} (mean±std):')
             for metric, values in scores.items():
-                logger.info(f" - {metric:17}: {values['mean']:.3f}±{values['std']:.4f}")
+                logger.info(f"- {metric:17}: {values['mean']:.3f}±{values['std']:.4f}")
 
     if return_history:
         # count the total appearances of misclassified ids:

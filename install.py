@@ -114,7 +114,6 @@ def main():
         logging.info("Verifying package installation...")
         try:
             subprocess.run(["python", "-c", "import aktiRBD", "from xgboost import XGBClassifier"], check=True)
-            logging.info("Quality-control check passed: aktiRBD imported successfully!")
             logging.info("Installation successful!")
         except subprocess.CalledProcessError:
             logging.error("Quality-control check failed: aktiRBD could not be imported.")

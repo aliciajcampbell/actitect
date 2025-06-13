@@ -39,14 +39,17 @@ class PooledTrainPipeline(BasePipeline):
         config.nested_cv.load_path_cv_feature_rankings = \
             Path(str(config.nested_cv.load_path_cv_feature_rankings).replace('cv_pooled', f'cv_pooled/{_cv_name}'))
 
-        nested_cv = cv_instance(config, save_path=_save_path_cv)
+        nested_cv = cv_instance(
+            config, save_path=_save_path_cv, calibration=self.config.nested_cv.default_experiment.calibration)
         logger.info(f"[{_cv_name}]: starting nested cross-validation: {nested_cv}")
         with utils.Timer() as timer:
             nested_cv.fit(train.copy())
             logger.info(f"\n[{_cv_name}]: elapsed time with n_jobs={self.config.nested_cv.n_jobs}: {timer()}")
         nested_cv.eval()
 
-    def _run_pretrain(self, train: FeatureSet, test: FeatureSet):
+    def _run_pretrain(self, train: FeatureSet):
         _save_path_pretrain = utils.check_make_dir(self.save_path.joinpath('pretrain_hps'), True)
+        config = self.config.copy()
+        config.final_model.nested_cv_path = Path(str(config.final_model.nested_cv_path).replace('nested_cv', 'KFold'))
         model_manager_pretrain = ModelManager(self.config, _save_path_pretrain)
-        model_manager_pretrain.pretrain(train.copy(), test.copy())
+        model_manager_pretrain.pretrain(train.copy(), dataset_save_tag='pooled')

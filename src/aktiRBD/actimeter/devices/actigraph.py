@@ -82,8 +82,8 @@ class ActiGraph(BaseDevice):  # noqa
                                 print(record)
                                 raise ValueError(
                                     f"(io: {self.meta['patient_id']}) ValueError:"
-                                    f" Unexpected sample count in {record_type_name} record:"
-                                    f" expected {self.sample_rate}, got {decoded.shape[0]}.")
+                                    f"Unexpected sample count in {record_type_name} record:"
+                                    f"expected {self.sample_rate}, got {decoded.shape[0]}.")
                             activity_types.add(record_type_name)
                         else:  # for battery and lux, only average over 1s is recorded, repeated over full record length
                             decoded = self._pad_average_value_over_record_length(decoded, self.sample_rate)
@@ -166,11 +166,11 @@ class ActiGraph(BaseDevice):  # noqa
 
             raise NotImplementedError(
                 f"(io: {self.meta['patient_id']}) Unknown or unsupported calibration method:"
-                f" {calibration_info.get('calibrationMethod')}")
+                f"{calibration_info.get('calibrationMethod')}")
 
         else:
             logger.warning(f"(io: {self.meta['patient_id']}) {self.LogRecord.CALIBRATION_FILE_NAME}"
-                           f" missing, skipping manufacturer calibration. ")
+                           f"missing, skipping manufacturer calibration. ")
             return acceleration / isotropic_scale_factor
 
     @staticmethod

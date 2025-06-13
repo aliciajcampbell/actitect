@@ -50,7 +50,7 @@ __all__ = ['FeatureRanker']
         rank_df = pd.read_csv(ranking_file).set_index('total_rank')
     else:
         logger.warning(f"no pre-computed ranking file found for '{rank_path}' at {log_message_prefix},"
-                       f" computation may take a while.")
+                       f"computation may take a while.")
 
         ranker = FeatureRanker(data, data_config, ranking_file.parent, n_jobs=n_jobs, draw_plot=draw_plots)
         rank_df = ranker.run()
@@ -122,7 +122,7 @@ class FeatureRanker:
             rank_df = pd.read_csv(ranking_file).set_index('total_rank')
         else:
             logger.warning(f"no pre-computed ranking file found for '{self.root_dir}' at {log_message_prefix},"
-                           f" computation may take a while.")
+                           f"computation may take a while.")
             self.out_dir = utils.check_make_dir(self.out_dir, use_existing=True)
             rank_df = self._run_ensemble()
 
@@ -154,7 +154,7 @@ class FeatureRanker:
         for _method_key, _method_weight in ranking_methods:
             if _method_key not in self.method_dispatch:
                 raise ValueError(f"Unknown ranking method: {_method_key}."
-                                 f" Choose from {sorted(list(self.method_dispatch.keys()))}")
+                                 f"Choose from {sorted(list(self.method_dispatch.keys()))}")
 
             _method_rank_df = self.method_dispatch[_method_key]().get(f'{self.data_config.agg_level}').reset_index()
             rank_df[f"{_method_key}(x{_method_weight})"] = _method_rank_df[
@@ -293,8 +293,8 @@ class FeatureRanker:
                     f"Redundancy matrix is not symmetric! "
                     f"asymmetry at {_thresh}: {non_symmetric_indices}/"
                     f"{redundancy_matrix.shape[0] * redundancy_matrix.shape[1]}"
-                    f" = {100 * non_symmetric_indices / (redundancy_matrix.shape[0] * redundancy_matrix.shape[1]):.2f}"
-                    f" %")
+                    f"= {100 * non_symmetric_indices / (redundancy_matrix.shape[0] * redundancy_matrix.shape[1]):.2f}"
+                    f"%")
 
             redundancy_matrix = redundancy.to_numpy()
             # redundancy_matrix = (redundancy_matrix + redundancy_matrix.T) / 2
@@ -446,7 +446,7 @@ class FeatureRanker:
             ranking.to_csv(_out_dir.joinpath(f"variance_{self.data_config.agg_level}.csv"))
 
             del var, rel_var, med, x
-            logger.info(f" evaluated variance. ({timer()}s)")
+            logger.info(f"evaluated variance. ({timer()}s)")
 
         return {f"{self.data_config.agg_level}": ranking}
 
@@ -515,7 +515,7 @@ class FeatureRanker:
             ranking.loc[nan_ranks, 'rank'] = len(ranking)
             ranking = ranking.sort_values(by='rank').set_index('rank')
             ranking.to_csv(_out_dir.joinpath(f"rbd_vs_hc_{self.data_config.agg_level}.csv"))
-            logger.info(f" evaluated variance. ({timer()}s)")
+            logger.info(f"evaluated variance. ({timer()}s)")
 
         return {f"{self.data_config.agg_level}": ranking}
 

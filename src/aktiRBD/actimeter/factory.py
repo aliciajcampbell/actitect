@@ -35,8 +35,8 @@ class ActimeterFactory:
         device_class = EXT_2_DEVICE_MAP.get(_ext)
 
         if device_class is None:
-            raise ValueError(f" file extension '{_ext}' is not supported."
-                             f" Available devices are: Axivity ('.cwa') and GENEActive ('.bin')")
+            raise ValueError(f"file extension '{_ext}' is not supported."
+                             f"Available devices are: Axivity ('.cwa') and GENEActive ('.bin')")
         else:
 
             valid_keys = DEVICE_KWARGS_MAP.get(device_class, set())
@@ -47,6 +47,6 @@ class ActimeterFactory:
                 ignored = set(kwargs) - valid_keys
                 if ignored:
                     logger.warning(f"(io: {patient_id}) Ignored unsupported kwargs for"
-                                   f" {device_class.__name__}: {ignored}")
+                                   f"{device_class.__name__}: {ignored}")
 
             return device_class(file_path, patient_id, **filtered_kwargs)

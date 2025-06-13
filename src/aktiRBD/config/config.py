@@ -136,8 +136,9 @@ class FinalModelConfig(BaseConfig):
     n_jobs: int
     bayes_cv: CVConfig
     bayes_params: BayesParamsConfig
+    stratify_by_dataset_if_pooled: bool
     early_stopping: EarlyStoppingConfig
-    include_pretrain_full: bool
+    include_pretrain_merged: bool
     overwrite_final_repo_models: bool
     log_night_level: bool
     output_patient_csv: bool

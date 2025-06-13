@@ -45,7 +45,7 @@ class Evaluator:
             f"'valid_data' instance of type '{type(valid_data)}' need to have values assigned to '.prob' attribute."
         if train_data is not None:
             assert train_data.prob is not None, \
-                f" if 'train_data' is provided, the '{type(train_data)}' needs to have values assigned to '.prob'."
+                f"if 'train_data' is provided, the '{type(train_data)}' needs to have values assigned to '.prob'."
 
         if generate_night_output:  # save night level evaluation
             night_threshold = self.thresholds.get('night')

@@ -22,7 +22,7 @@ class CustomCalibratedClassifierCV(CalibratedClassifierCV):
     """ Custom subclass of CalibratedClassifierCV to enable grouped cv and early stopping. """
 
     def __init__(self, estimator=None, *, method: str = 'sigmoid', cv=None, n_jobs: int = None, ensemble: bool = True,
-                 base_estimator: str = "deprecated", pass_fold_as_eval_set: bool = False):
+                 base_estimator: str = 'deprecated', pass_fold_as_eval_set: bool = False):
 
         super().__init__(estimator=estimator, method=method, cv=cv, n_jobs=n_jobs, ensemble=ensemble,
                          base_estimator=base_estimator)
@@ -54,15 +54,18 @@ class CustomCalibratedClassifierCV(CalibratedClassifierCV):
         else:
             # Create CV splitter, explicitly passing 'groups'
             cv = check_cv(self.cv, y, classifier=True)
-            splits = list(cv.split(X, y, groups=groups))
+            if hasattr(cv, "split"):  # splitter or int
+                splits = list(cv.split(X, y, groups=groups))
+            else:  # iterable of pre-computed splits
+                splits = list(cv)
 
             label_encoder_ = LabelEncoder().fit(y)
             self.classes_ = label_encoder_.classes_
             n_classes = len(self.classes_)
 
             # Check if each class has enough samples for #folds
-            if hasattr(cv, "n_splits"):
-                n_folds = cv.n_splits
+            n_folds = getattr(cv, "n_splits", len(splits))
+            if n_folds:
                 if any((y == cl).sum() < n_folds for cl in self.classes_):
                     raise ValueError(f"Requesting {n_folds}-fold CV but < {n_folds} examples for at least one class.")
 
