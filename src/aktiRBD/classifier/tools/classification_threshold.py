@@ -165,7 +165,7 @@ def eval_roc_and_pr_curves(y_true, y_prob, lvl: str, mode: str, eval_params: dic
 
         _roc_mode = {'curve': 'roc', 'lvl': lvl}
         _fig_roc = draw_roc_or_pr_curve(_fpr, _tpr, _thresholds_roc, _roc_mode)
-        _fig_roc.savefig(eval_params.get('save_path').joinpath(f"{lvl}_roc_curve_.png"), bbox_inches='tight', dpi=400)
+        _fig_roc.savefig(eval_params.get('save_path').joinpath(f"{lvl}_roc_curve.png"), bbox_inches='tight', dpi=400)
 
         if eval_params.get('cv_mode'):  # for cv_mode, store the data to later aggregate an average
             _interp_fpr = np.linspace(0, 1, eval_params.get('n_interp_points_roc_pr'))

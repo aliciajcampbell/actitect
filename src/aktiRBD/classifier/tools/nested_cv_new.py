@@ -215,11 +215,19 @@ class NestedCVBase(ABC):
                     train_outer_top_k, self.config.nested_cv.default_experiment.threshold)
                 thresholds = {'night': fold_night_threshold, 'patient': fold_patient_threshold}
 
-                evaluator = Evaluator(
-                    save_path_early_stopping, self.config.nested_cv.default_experiment, thresholds,
-                    cv_config=self.config.nested_cv, cv_mode=True)
-                evaluator.evaluate(
-                    train_outer_top_k, valid_outer_top_k, generate_night_output=self.config.nested_cv.log_night_eval)
+                # evaluate on all patients and, as a sensitivity check, on patients with ≥ 2 nights
+                _min_n_nights = self.config.nested_cv.min_patient_nights_eval
+                for _valid_set, _save_tag in [
+                    (valid_outer_top_k, _suffix),  # all patients
+                    (valid_outer_top_k.filter_patients_min_nights(  # at least N nights
+                        _min_n_nights), f"{_suffix}_min_{_min_n_nights}_nights")]:
+                    if _valid_set.x.size == 0:  # nothing to score after filtering
+                        continue
+                    _out_dir = utils.check_make_dir(save_path_fold.joinpath(_save_tag), True)
+                    ev = Evaluator(_out_dir, self.config.nested_cv.default_experiment, thresholds,
+                                   cv_config=self.config.nested_cv, cv_mode=True)
+                    ev.evaluate(
+                        train_outer_top_k, _valid_set, generate_night_output=self.config.nested_cv.log_night_eval)
 
                 del opt_model
 

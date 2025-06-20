@@ -77,6 +77,21 @@ class FeatureSet:
         return FeatureSet(x=new_x, y=new_y, group=new_group, feat_map=self.feat_map, process_params=self.process_params,
                           prob=new_prob, dataset=new_dataset)
 
+    def filter_patients_min_nights(self, min_nights: int) -> "FeatureSet":
+        """Return a new FeatureSet that keeps only those patients (i.e. `group` IDs)
+        that have at least `min_nights` samples per group.
+        Parameters
+            :param min_nights: (int) Minimum number of samples a patient must contribute to be retained.
+        """
+        # count samples per patient
+        ids, counts = np.unique(self.group, return_counts=True)
+        keep_ids = set(ids[counts >= min_nights])
+
+        # boolean mask of samples whose patient ID is in keep_ids
+        mask = np.isin(self.group, list(keep_ids))
+
+        return self.select_samples(np.where(mask)[0])
+
     def fit_transform(self, scaler: str, use_smote: bool, smote_seed: int, scaling_order: Optional[str] = None,
                       rank_kwargs: Optional[dict] = None):
         """ Fit and transform the processing pipeline for the FeatureSet. Should be used on training data only.
@@ -281,6 +296,14 @@ class Fold:
 
             return _delegated_method
         return feature_set_attr
+
+    def __setattr__(self, name, value):  # backward delegation, e.g. Fold.probs == .. -> also set for inner FeatureSet!
+        if name in {"name", "k", "feature_set"} or name.startswith("_"):
+            super().__setattr__(name, value)  # keep Fold's own fields
+        elif "feature_set" in self.__dict__ and hasattr(self.feature_set, name):
+            setattr(self.feature_set, name, value)  # write-through to inner FeatureSet
+        else:
+            super().__setattr__(name, value)  # fallback: new attr on Fold
 
 
 if __name__ == '__main__':

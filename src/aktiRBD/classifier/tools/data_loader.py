@@ -231,8 +231,10 @@ class DataLoader:
     def _get_meta(self, meta_csv_path: Path):
         # read meta file
         meta_df = utils.read_meta_csv_to_df(meta_csv_path, exclude=True, verbose=self.verbose)
+
         assert 'diagnosis' in meta_df.columns, f"'meta_df' at {meta_csv_path} must contain a 'diagnosis' column."
-        assert not meta_df['diagnosis'].isnull().any(), "'diagnosis' column contains NaN values."
+        _is_null = meta_df.diagnosis.isnull()
+        assert not meta_df.diagnosis.isnull().any(), "'diagnosis' column contains NaN values."
         assert set(self.binary_mapping.keys()).issubset(set(meta_df['diagnosis'].unique())), \
             (f"Mapping values {set(self.binary_mapping.keys())} are not a subset of "
              f"diagnosis values {set(meta_df['diagnosis'].unique())}.")
@@ -553,8 +555,8 @@ class DataLoader:
 
             _feature_dir_path = (patient_dir / f"{_id}/{self.feature_dir}" if _record_id in [None, 'None']
                                  else patient_dir / f"{_id}" / f"{_id}_{_record_id}/{self.feature_dir}")
-
             _global_feat_paths = sorted(list(_feature_dir_path.glob('*global*.csv')))
+
             if len(_global_feat_paths) != 1:
                 raise UserWarning(f"none or too many global feature files found for {_record_key}.")
 

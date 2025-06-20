@@ -128,6 +128,7 @@ class NestedCVConfig(BaseConfig):
     default_experiment: ExperimentConfig
     log_night_eval: bool
     stratify_by_dataset_if_pooled: bool
+    min_patient_nights_eval: int
     load_path_cv_feature_rankings: Union[str, Path] = None
 
 
