@@ -5,15 +5,16 @@ import datetime
 import json
 import logging
 import logging.config
+import math
 import os
 import re
+import statistics
 import sys
 import time
 import traceback
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Dict
-from typing import Union
+from typing import Dict, Union, Hashable, Any
 
 import joblib
 import numpy as np
@@ -28,14 +29,17 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 
 try:
     from numba import njit as _numba_njit
+
     NUMBA_AVAILABLE = True
-except ImportError:        # user did not install numba ⇒ graceful fallback
+except ImportError:  # numba not installed
     NUMBA_AVAILABLE = False
 
-    # no-op stand-in that accepts the same signature as njit(...)
+
+    # dummy decorator that accepts the same signature as njit(...)
     def _numba_njit(*args, **kwargs):
         def decorator(func):
             return func
+
         return decorator
 
 __all__ = [
@@ -150,61 +154,123 @@ def custom_tqdm(total, position=0, leave=True, disable=False, color=Fore.MAGENTA
 
 
 # i/o related:
+def detect_csv_delimiter(filepath: Union[str, Path], *, sample_size: int = 1 << 14, possible: list[str] = None,
+                         fallback: str = ';'):
+    """Detect the delimiter of a csv file.
+    Parameters
+        :param filepath: (str) | pathlib.Path
+        :param sample_size: (int) bytes of the file to inspect (default 16 kB)
+        :param possible: (str | list) set of delimiters to test, e.g. ',;\t|', default = ',;\t|:'
+        :param fallback: (str) delimiter returned when nothing can be decided.
+    Returns
+        :return: (str) detected delimiter or *fallback* as last resort."""
+    path = Path(filepath)
 
-def detect_csv_delimiter(file_path):
-    with open(file_path, 'r', newline='', encoding='utf-8') as file:
-        sample = file.read(2048)
-        sniffer = csv.Sniffer()
+    if isinstance(possible, str):
+        candidates = list(possible)
+    elif isinstance(possible, (list, tuple, set)):
+        candidates = list(possible)
+    else:
+        candidates = [',', ';', '\t', '|', ':']
+
+    # 1. collect test sample
+    sample = path.read_text('utf-8', errors='ignore')[:sample_size]
+    if not sample:
+        logger.warning("empty file – falling back to default delimiter %r", fallback)
+        return fallback
+
+    lines = [ln for ln in sample.splitlines() if ln.strip()]
+    if len(lines) < 2:  # at least two real lines are needed
+        logger.warning("not enough lines for delimiter detection – defaulting")
+        return fallback
+
+    # 2. try csv.Sniffer but verify proposed delimiter
+    try:
+        sniffed = csv.Sniffer().sniff(sample, delimiters=''.join(candidates))
+        delim = sniffed.delimiter
+        if delim in candidates:
+            # verify: every line must have identical, non-zero column count
+            counts = [ln.count(delim) for ln in lines]
+            if counts and counts.count(counts[0]) == len(counts) and counts[0] > 0:
+                return delim
+            logger.debug("Sniffer proposed %r but column counts inconsistent – discarding", delim)
+    except Exception as err:
+        logger.debug("csv.Sniffer failed (%s) – trying heuristics", err)
+
+    # 3. heuristic scoring: score = (low variance of counts) + (high mean count)
+    best_delim, best_score = None, -math.inf
+    for delim in candidates:
+        counts = [ln.count(delim) for ln in lines]
+        if not counts or all(c == 0 for c in counts):
+            continue  # delimiter never appears
+        # variance should be low, mean should be high
         try:
-            dialect = sniffer.sniff(sample)
-            if dialect.delimiter not in [';', ',', '\t', '|']:  # restrict to common delimiters
-                raise ValueError(f"unexpected delimiter: {dialect.delimiter}")
-            return dialect.delimiter
-        except Exception as e:
-            logger.warning(f"failed to detect delimiter: {e}. Defaulting to ';'")
-            return ';'
+            var = statistics.pvariance(counts)
+        except statistics.StatisticsError:  # happens when len(counts)==1
+            var = 0.0
+        score = (sum(counts) / len(counts)) - var  # larger → better
+        if score > best_score:
+            best_delim, best_score = delim, score
+    if best_delim:
+        logger.debug("Heuristic chose delimiter %r (score %.3f)", best_delim, best_score)
+        return best_delim
+
+    # 4. failed, fallback
+    logger.warning("failed to detect delimiter – defaulting to %r", fallback)
+    return fallback
 
 
 def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False, verbose: bool = True):
-    delimiter = detect_csv_delimiter(path_to_csv)
-    meta_df = pd.read_csv(path_to_csv, delimiter=delimiter)
-    meta_df.columns = meta_df.columns.str.strip()
-    if '#' in meta_df.columns:
-        meta_df.set_index('#', inplace=True)
 
-    # format timestamps if needed
-    if 'timestamps' in meta_df.columns:
-        meta_df['timestamps'] = meta_df['timestamps'].apply(
-            lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
-
-    filtered_cols = [_col for _col in meta_df.columns if 'Unnamed' not in _col]
-    meta_df = meta_df[filtered_cols]
-
-    # strip whitespaces in strings if present
-    meta_df = meta_df.map(lambda x: x.strip() if isinstance(x, str) else x)
-
-    # optionally exclude rows
-    if exclude and 'exclude' in meta_df.columns:
-        excluded_rows = meta_df[meta_df['exclude'] == 1]
-        dropped_ids = excluded_rows['ID'].tolist()
-        if verbose:
-            logger.info(f"Dropping {len(excluded_rows)} row(s) with exclude == 1. IDs: {dropped_ids}")
-        meta_df = meta_df[meta_df['exclude'] != 1]
-
-    # ensure required columns exist:
-    required_cols = {'filename', 'ID'}
-    missing_cols = required_cols - set(meta_df.columns)
-    if missing_cols:
-        raise ValueError(f"Metadata file is missing required columns: {missing_cols}")
-    if 'record_ID' not in meta_df.columns:
-        meta_df['record_ID'] = None
-
-    # drop last row if it is a summary row (simply check if last row contains a valid filename or not)
-    def __row_has_valid_filename(row):
+    def _row_has_valid_filename(row):
         from aktiRBD.actimeter import SUPPORTED_FILETYPES
         return any(str(row['filename']).endswith(ext) for ext in SUPPORTED_FILETYPES)
-    if not __row_has_valid_filename(meta_df.iloc[-1]):
-        meta_df = meta_df.iloc[:-1].copy()
+
+    def _handle_exclusion(df: pd.DataFrame, *, col: str = 'exclude',
+                          drop: bool = True,
+                          log: bool = True,
+                          ) -> pd.DataFrame:
+        """
+        Canonicalise *df[col]* and (optionally) drop rows that have exclude == '1'.
+
+        Canonical forms
+        ---------------
+            keep   : 0, 0.0, '0', '0.0', 'false', 'no',  NaN/None/''  → '0'
+            maybe  : '?', ' ?', ' ? '                                 → '?'
+            drop   : 1, 1.0, '1', '1.0', 'true', 'yes'                → '1'
+        """
+
+        # ─────────────────────── helper ────────────────────────────────
+        def _canonical(val: Any) -> object:
+            if pd.isna(val):  # NaN / None / ''
+                return '0'  # treat as “keep”
+            if isinstance(val, (int, np.integer, float, np.floating)):
+                return '1' if float(val) == 1.0 else '0'
+            s = str(val).strip().lower()
+            if s in {"1", "1.0", "true", "yes"}:
+                return '1'
+            if s in {"0", "0.0", "false", "no"}:
+                return '0'
+            if s == '?':
+                return '?'
+            return '0'  # everything else ⇒ keep
+
+        # ─────────────────── canonicalise column ───────────────────────
+        out = df.copy()
+        if col not in out.columns:
+            out[col] = '0'  # default: keep
+        out[col] = out[col].apply(_canonical).astype('string')
+
+        # ──────────────────── log always, drop optional ────────────────
+        flagged = out[out[col] == '1']
+        if log and len(flagged):
+            ids = flagged['ID'].tolist() if 'ID' in flagged.columns else flagged.index.tolist()
+            logger.info("Found %d row(s) with exclude == 1. IDs: %s", len(flagged), ids)
+
+        if drop:
+            out = out[out[col] != '1']  # keep '0' and '?'
+
+        return out
 
     def _assign_record_ID(group: pd.DataFrame, ID_value: str):
         """ Assigns unique recording IDs for patients with multiple recordings.
@@ -223,8 +289,51 @@ def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False, verbose: bool 
 
         return group
 
+    delimiter = detect_csv_delimiter(path_to_csv)
+    meta_df = pd.read_csv(path_to_csv, delimiter=delimiter)
+
+    meta_df.columns = meta_df.columns.str.strip()
+    if '#' in meta_df.columns:
+        meta_df.set_index('#', inplace=True)
+
+    # format timestamps if needed
+    if 'timestamps' in meta_df.columns:
+        meta_df['timestamps'] = meta_df['timestamps'].apply(
+            lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
+
+    filtered_cols = [_col for _col in meta_df.columns if 'Unnamed' not in _col]
+    meta_df = meta_df[filtered_cols]
+
+    # strip whitespaces in strings if present
+    meta_df = meta_df.map(lambda x: x.strip() if isinstance(x, str) else x)
+
+    # optionally exclude rows
+    meta_df = _handle_exclusion(meta_df, drop=exclude, log=verbose)
+
+    # ensure required columns exist:
+    required_cols = {'filename', 'ID'}
+    missing_cols = required_cols - set(meta_df.columns)
+    if missing_cols:
+        raise ValueError(f"Metadata file is missing required columns: {missing_cols}")
+    if 'record_ID' not in meta_df.columns:
+        meta_df['record_ID'] = None
+
+    # drop last row if it is a summary row (simply check if last row contains a valid filename or not)
+    if not _row_has_valid_filename(meta_df.iloc[-1]):
+        meta_df = meta_df.iloc[:-1].copy()
+
     meta_df = meta_df.groupby('ID', group_keys=False).apply(
         lambda g: _assign_record_ID(g, g.name), include_groups=False)
+
+    # filename normalization and duplicate check
+    meta_df['filename'] = meta_df['filename'].astype('string').str.strip().replace(
+        {'': pd.NA, 'nan': pd.NA, 'NaN': pd.NA})
+
+    dupe_mask = meta_df['filename'].notna() & meta_df['filename'].duplicated(keep=False)
+    if dupe_mask.any():
+        dup_list = meta_df.loc[dupe_mask, 'filename'].unique()
+        raise AssertionError(
+            f"Duplicate filenames found in meta file (missing values ignored): {', '.join(map(str, dup_list))}")
 
     assert not meta_df.duplicated(subset=['ID', 'record_ID']).any(), \
         "Duplicate combinations of 'ID' and 'record_ID' found in meta file."
@@ -836,6 +945,7 @@ def compute_mean_std_ci(data: np.ndarray, confidence_level: float):
         ci_lower = mean_val - margin
         ci_upper = mean_val + margin
     return mean_val, std_val, ci_lower, ci_upper, margin
+
 
 def optional_njit(*args, **kwargs):
     """Decorate a function with numba.njit if Numba is present,

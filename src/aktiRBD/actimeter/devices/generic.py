@@ -30,7 +30,7 @@ class GenericCSV(BaseDevice):
 
             try:
                 delimiter = utils.detect_csv_delimiter(self.processing_info['loading']['filepath'])
-                logger.info(f"(io: {self.meta['patient_id']}) detected delimiter: '{delimiter}'.")
+                logger.debug(f"(io: {self.meta['patient_id']}) detected delimiter: '{delimiter}'.")
 
                 df = pd.read_csv(self.processing_info['loading']['filepath'], sep=delimiter, parse_dates=['time'])
                 df.rename(columns=str.lower, inplace=True)  # ensure x/y/z columns are lowercase
