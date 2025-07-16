@@ -1,0 +1,19 @@
+datasets:
+  CogTrAiL: "b" # Cologne Train
+  Local Test: "c" # Cologne Test
+  OPDC: "m"  # Oxford
+  PACE-I: '#DC965A' # '#EEC584' # Aarhus, '#DC965A', '#007F5F'
+  CogTrAiL + Local Test: "#4B9CD3"
+
+
+aliases:  # non-case sensitive
+  cgn train: CogTrAiL
+  cgntrain: CogTrAiL
+  cgn test: Local Test
+  cgntest: Local Test
+  aar: PACE-I
+  aarhus: PACE-I
+  oxf: OPDC
+  cgn pooled: CogTrAiL + Local Test
+  cgn: CogTrAiL + Local Test
+

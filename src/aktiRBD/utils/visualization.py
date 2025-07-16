@@ -6,8 +6,16 @@ import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.lines import Line2D
 from scipy import stats
+from matplotlib.patches import Rectangle
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+from matplotlib.legend_handler import HandlerBase
+from matplotlib.legend_handler import HandlerTuple
 from sklearn import metrics
+
+from itertools import cycle
 
 from aktiRBD import utils
 
@@ -15,6 +23,36 @@ __all__ = ['draw_actigraphy_data', 'draw_roc_or_pr_curve', 'draw_cv_roc_or_pr_cu
 
 plt.rcParams['font.weight'] = 'bold'
 plt.rcParams['axes.labelweight'] = 'bold'
+
+
+class HandlerShadeLine(HandlerBase):
+    """Legend handle: grey band + dashed mean line."""
+
+    def create_artists(self, legend, orig_handle,
+                       x0, y0, width, height, fontsize, trans):
+        # unpack what we supplied in the tuple
+        patch_obj, line_obj = orig_handle
+
+        # pull the face-colour & alpha from that patch
+        face_col = patch_obj.get_facecolor()
+        alpha = patch_obj.get_alpha() or 1.0  # default if None
+
+        band = Rectangle((x0, y0 + .25 * height),  # lower-left corner
+                         width, .5 * height,  # full width, half height
+                         facecolor=face_col,
+                         edgecolor='none',
+                         lw=0,
+                         alpha=alpha,
+                         transform=trans)
+
+        ln = Line2D([x0, x0 + width],
+                    [y0 + .5 * height] * 2,
+                    color=line_obj.get_color(),
+                    lw=line_obj.get_linewidth(),
+                    linestyle=line_obj.get_linestyle(),
+                    transform=trans)
+
+        return [band, ln]
 
 
 def draw_actigraphy_data(df: pd.DataFrame, _sleep_log: pd.DataFrame = None, raw_only: bool = False):
@@ -203,7 +241,8 @@ def draw_roc_or_pr_curve(x: np.ndarray, y: np.ndarray, thres: np.ndarray, mode: 
     return fig
 
 
-def draw_cv_roc_or_pr_curve(curve_dict: dict[list], mode: str, cl: float = .90, display_op_point: bool = False):
+def draw_cv_roc_or_pr_curve(
+        curve_dict: dict, mode: str, cl: float = .95, *, display_op_point: bool = False, lodo_labels: dict = None):
     if mode == 'roc':
         x, y = np.array(curve_dict['fpr']), np.array(curve_dict['tpr'])
         metric, op_point = np.array(curve_dict['auc']), np.array(curve_dict['op_point'])
@@ -236,23 +275,82 @@ def draw_cv_roc_or_pr_curve(curve_dict: dict[list], mode: str, cl: float = .90, 
     _metric_name = 'f1_{max}' if mode == 'pr' else 'AUC'
     _line_label = rf"${_metric_name} = {mean:.2f}^{{\,+{ci_upper - mean:.2f}}}_{{\,-{mean - ci_lower:.2f}}}$"
 
-    ax.plot(x, mean_y, lw=1, zorder=200, color=_c, linestyle='-', alpha=1.0, label=_line_label)
-    ax.fill_between(x, y_lower, y_upper, zorder=150, color='grey', alpha=.2,
-                    label=rf"$ {cl * 100:.0f}\% \,CI\,(\sigma={std:.2f})$")
+    is_lodo = lodo_labels is not None
+    if not is_lodo:
+        lodo_labels = [None] * len(y)  # dummy for zip
+    else:
+        LINESTYLES = ['-', '--', '-.', ':']
+        STYLE_CYCLER = cycle(LINESTYLES)
+        style_by_dataset = {}
+
+    custom_handles, custom_labels = [], []
+    sorted_entries = sorted(zip(metric, y, lodo_labels), key=lambda t: t[0], reverse=True)
+
+    for val, _y, ds_specs in sorted_entries:
+        if lodo_labels and isinstance(ds_specs, tuple):
+            ds_name, ds_color = ds_specs
+            if ds_name not in style_by_dataset:
+                style_by_dataset[ds_name] = next(STYLE_CYCLER)
+            ds_style = style_by_dataset[ds_name]
+            # label = f"{ds_name} \n(AUC = {val:.2f})" if mode == 'roc' else f"{ds_name} (F1 = {val:.2f})"
+            ax.plot(x, _y, lw=1, zorder=400, color=ds_color, ls=ds_style, alpha=.85)  # , label=label)
+            line = Line2D([0], [0], color=ds_color, lw=3, linestyle=ds_style)
+
+            ds_label = f"{ds_name}"  # left-aligned name
+            auc_str = f"{val:.2f}"  # right-aligned number
+            label = f"{ds_label} ({auc_str})"
+            custom_labels.append(label)
+            custom_handles.append(line)
+
+        else:
+            ax.plot(x, _y, lw=.7, zorder=100, color='grey', linestyle='-', alpha=.35)
+
+    if is_lodo:
+        _color = 'grey'
+        mean_line, = ax.plot(x, mean_y, lw=.5, zorder=100, color=_color, linestyle='-', alpha=.3, label=_line_label)
+        ax.fill_between(x, y_lower, y_upper, zorder=150, color=_color, alpha=.1)
+        # label=rf"$ {cl * 100:.0f}\% \,CI\,(\sigma={std:.2f})$")
+        # custom_handles.append(Line2D([0], [0], color='gray', lw=2, linestyle='--'))
+        ci_patch = Patch(facecolor=_color, alpha=.2)
+        custom_handles.append((ci_patch, mean_line))  # a *tuple*
+        custom_labels.append(
+            rf"{'mean'} (${mean:.2f}^{{\,+{ci_upper - mean:.2f}}}_{{\,-{mean - ci_lower:.2f}}})$") #, \sigma={std:.2f})$")
+
+    else:
+        ax.plot(x, mean_y, lw=1, zorder=200, color=_c, linestyle='-', alpha=1.0, label=_line_label)
+        ax.fill_between(x, y_lower, y_upper, zorder=150, color='grey', alpha=.2,
+                        label=rf"$ {cl * 100:.0f}\% \,CI\,(\sigma={std:.2f})$")
     if display_op_point:
         _label_scatter = f"op. point={np.mean(op_point):.2f}±{np.std(op_point):.2f}" if mode == 'roc' \
             else (f"op. point={np.mean(op_point['dist']):.2f}±{np.std(op_point['dist']):.2f} "
                   f"({np.mean(op_point['f1']):.2f}±{np.std(op_point['f1']):.2f} f1)")
         ax.scatter(x, mean_y, s=20, marker='o', zorder=200, color=_c, alpha=.6, edgecolor='k', label=_label_scatter)
 
-    for _y in y:
-        ax.plot(x, _y, lw=.7, zorder=100, color='grey', linestyle='-', alpha=.35)
-
     if mode == 'roc':
         ax.set_ylim(-.045, 1.045)
         mean_y[-1] = 1.0
         ax.plot([0, 1.], [0, 1], color='k', lw=1, linestyle='--')
-        ax.legend(loc=(.4, .1), fontsize=15, frameon=False)
+        if is_lodo:
+            FIG = '\u2007'
+            title_str = f"{FIG} Dataset (AUC)"
+
+            legend = ax.legend(
+                handles=custom_handles,
+                labels=custom_labels,
+                loc='lower right',
+                fontsize=16,
+                handlelength=1.8,
+                borderaxespad=.4,
+                frameon=False,
+                handler_map={tuple: HandlerShadeLine()},
+                title=title_str,
+                title_fontsize=16,
+                labelspacing=.5
+            )
+
+            legend.get_title().set_ha('left')
+        else:
+            ax.legend(loc=(.4, .1), fontsize=15, frameon=False)
         ax.set_ylabel('True Positive Rate (Sensitivity)', fontsize=16, labelpad=20)
         ax.set_xlabel('False Positive Rate (1-Specifity)', fontsize=16, labelpad=20)
 
@@ -269,6 +367,10 @@ def draw_cv_roc_or_pr_curve(curve_dict: dict[list], mode: str, cl: float = .90, 
 
 
 def draw_cv_boxplot(history: dict, ylims=(.5, 1), cl: float = .90):
+
+    history = {k:v for k,v in history.items() if k in (
+        'accuracy', 'balanced_accuracy', 'roc_auc', 'f1', 'recall', 'precision', 'average_precision')}
+
     names, data = [], []
     for name, _data in history.items():
         if name == 'balanced_accuracy':
