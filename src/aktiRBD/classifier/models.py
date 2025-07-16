@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Union, Optional
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.ensemble import RandomForestClassifier
@@ -7,8 +7,9 @@ from sklearn.svm import SVC
 from xgboost import XGBClassifier
 from skopt.space import Real, Categorical, Integer
 
+from aktiRBD.config import TopKFeatsConfig
 
-__all__ = ['model_factory', 'ModelSetup']
+__all__ = ['model_factory', 'ModelSetup', 'space_to_bounds']
 
 
 @dataclass
@@ -20,10 +21,16 @@ class ModelSetup:
     bayesian_fixed_params: Dict[str, Any]
 
 
-def model_factory(model_name: str, cls_balance: float, seed: int, top_k_min: int = 5, top_k_max: int = 70) -> ModelSetup:
-    # todo: refactor as Class
+def model_factory(model_name: str, cls_balance: float, seed: int,
+                  top_k_cfg: Optional[TopKFeatsConfig] = None) -> ModelSetup:
 
-    common_bayes_param_space = [Integer(name='top_k_feats', low=top_k_min, high=top_k_max, prior='uniform')]
+    if top_k_cfg is not None:
+        topk_dim, fixed_topk = build_topk_dimension(top_k_cfg.dict())
+        common_bayes_param_space = [topk_dim] if topk_dim is not None else []
+        common_fixed = fixed_topk
+    else:
+        common_bayes_param_space = []
+        common_fixed = {}
 
     if model_name == 'xgboost':
         return ModelSetup(
@@ -90,6 +97,7 @@ def model_factory(model_name: str, cls_balance: float, seed: int, top_k_min: int
                 Real(name='subsample', low=0.1, high=0.99, prior='uniform')
             ],
             bayesian_fixed_params={
+                **common_fixed,
                 'random_state': seed,
                 'booster': 'gbtree',
                 # which booster: 'gbtree'(default)/'dart' for trees, 'gblinear' for linear functions
@@ -129,6 +137,7 @@ def model_factory(model_name: str, cls_balance: float, seed: int, top_k_min: int
                 Integer(name='degree', low=2, high=5, prior='uniform')  # Used only with 'poly' kernel
             ],
             bayesian_fixed_params={
+                **common_fixed,
                 'random_state': seed,
                 'probability': True,  # To enable probability estimates
                 'class_weight': 'balanced'
@@ -158,6 +167,7 @@ def model_factory(model_name: str, cls_balance: float, seed: int, top_k_min: int
                 Categorical(name='bootstrap', categories=[True, False])
             ],
             bayesian_fixed_params={
+                **common_fixed,
                 'random_state': seed,
                 'class_weight': 'balanced',
             },
@@ -185,6 +195,7 @@ def model_factory(model_name: str, cls_balance: float, seed: int, top_k_min: int
                 Categorical(name='multi_class', categories=['auto', 'ovr', 'multinomial']),
             ],
             bayesian_fixed_params={
+                **common_fixed,
                 'random_state': seed,
             },
         )
@@ -210,6 +221,7 @@ def model_factory(model_name: str, cls_balance: float, seed: int, top_k_min: int
                 Categorical(name='metric', categories=['minkowski', 'euclidean', 'manhattan']),
             ],
             bayesian_fixed_params={
+                **common_fixed,
                 'n_jobs': -1,  # Using all processors for distance computation if available
             },
         )
@@ -220,7 +232,53 @@ def model_factory(model_name: str, cls_balance: float, seed: int, top_k_min: int
             model=NotImplementedError,
             default_params={'todo': 'todo'},
             bayesian_param_space={'todo': 'todo'},
-            bayesian_fixed_params={'todo': 'todo'},)
+            bayesian_fixed_params={'todo': 'todo'}, )
 
     else:
         raise ValueError(f"Model {model_name} is not supported.")
+
+
+def build_topk_dimension(top_k_cfg: dict):
+    """Returns:
+        space_dim – Integer(...) or None
+        fixed – dict {'top_k_feats': value} or {}"""
+    if top_k_cfg.get("tune", True):
+        return Integer(
+            name="top_k_feats",
+            low=int(top_k_cfg["low"]),
+            high=int(top_k_cfg["high"]),
+            prior="uniform"
+        ), {}
+    else:
+        return None, {"top_k_feats": int(top_k_cfg["fixed_value"])}
+
+
+def space_to_bounds(space) -> dict:
+    """
+    Parameters
+    ----------
+    space : list[Dimension]
+        e.g. model_setup.bayesian_param_space — any mix of
+        skopt.space.Integer / Real / Categorical.
+
+    Returns
+    -------
+    dict
+        {<dimension name>: (low, high)}  — ready for `hp_stability(..)`
+        For categoricals the index range (0 … n-1) is returned.
+    """
+    bounds = {}
+    for i, dim in enumerate(space):
+        # make sure every dimension has a usable name
+        name = dim.name or f"dim_{i}"
+
+        if isinstance(dim, (Integer, Real)):
+            bounds[name] = (float(dim.low), float(dim.high))
+
+        elif isinstance(dim, Categorical):
+            bounds[name] = (0, len(dim.categories) - 1)
+
+        else:  # pragma: no cover
+            raise TypeError(f"Unsupported skopt dimension type: {type(dim)}")
+
+    return bounds

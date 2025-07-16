@@ -199,7 +199,8 @@ class FeatureRanker:
             _out_dir = utils.check_make_dir(self.out_dir.joinpath('boruta/'), True)
 
             n_hc_train, n_rbd_train = np.unique(self.data.y, return_counts=True)[1]
-            model_setup = model_factory(proxy_model, cls_balance=n_hc_train / n_rbd_train, seed=self.random_state)
+            model_setup = model_factory(
+                proxy_model, cls_balance=n_hc_train / n_rbd_train, seed=self.random_state, top_k_cfg=None)
             model = model_setup.model().set_params(**model_setup.default_params)
 
             boruta_history = []

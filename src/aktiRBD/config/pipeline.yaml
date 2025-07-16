@@ -10,6 +10,12 @@ model:
     n_calls: 100
     use_early_stopping: False
     verbose: True
+  feature_selection:
+    top_k_feats:
+      tune: true           # true  → include in BayesOpt space
+      low: 5 # 15 # 5
+      high: 70 # 35. # 70
+      fixed_value: 30      # used only if tune == false
 
 data:
   agg_level: 'night'
@@ -90,8 +96,8 @@ nested_cv:
     name: 'nested_cv'
     hp_setup_name:
     early_stopping:
-    calibration: 'sigmoid'
-    threshold: 'roc_dist'
+    calibration:  'sigmoid' # 'sigmoid'
+    threshold: 'default'  # 'roc_dist'
     patient_aggregation: 'ensemble_major'
 
   log_night_eval: false
@@ -110,6 +116,7 @@ final_model:
     early_stopping: { 'early_stopping_rounds': 10, 'eval_metric': [ 'logloss' ] }
     load_path_feature_rankings: # leave empty for default!
     log_night_level: false
+    min_patient_nights_eval: 4
     output_patient_csv: false
     experiments: # define experiment setups to try (note: test set is blinded, so choose one/two setups and only test once)
       - name: 'model1'

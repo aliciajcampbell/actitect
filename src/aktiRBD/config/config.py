@@ -1,11 +1,13 @@
 from pathlib import Path
 from dataclasses import dataclass, fields, asdict
+import re
 from typing import Type, TypeVar, Any, Dict, List, Union
 
 import yaml
 
 __all__ = ['PipelineConfig', 'ModelConfig', 'DataConfig', 'NestedCVConfig',
-           'FinalModelConfig', 'ExternalTestConfig', 'ExperimentConfig', 'LoaderConfig']
+           'FinalModelConfig', 'ExternalTestConfig', 'ExperimentConfig', 'LoaderConfig', 'DatasetConfig',
+           'TopKFeatsConfig', 'FeatureSelectionConfig']
 
 
 @dataclass
@@ -70,11 +72,25 @@ class BayesParamsConfig(BaseConfig):
 
 
 @dataclass
+class TopKFeatsConfig(BaseConfig):
+    tune: bool
+    low: int
+    high: int
+    fixed_value: int
+
+
+@dataclass
+class FeatureSelectionConfig(BaseConfig):
+    top_k_feats: TopKFeatsConfig
+
+
+@dataclass
 class ModelConfig(BaseConfig):
     which: str
     dummy: str
     early_stopping: EarlyStoppingConfig
     bayes_params: BayesParamsConfig
+    feature_selection: FeatureSelectionConfig
 
 
 @dataclass
@@ -142,6 +158,7 @@ class FinalModelConfig(BaseConfig):
     include_pretrain_merged: bool
     overwrite_final_repo_models: bool
     log_night_level: bool
+    min_patient_nights_eval: int
     output_patient_csv: bool
     experiments: List[ExperimentConfig]
     load_path_feature_rankings: Union[str, Path] = None
@@ -163,7 +180,33 @@ class PipelineConfig(BaseConfig):
 class ExternalTestConfig(BaseConfig):
     random_state: int
     n_jobs: int
+    min_patient_nights_eval: int
     pretrained_model_dirs: List[str]
     data: DataConfig
     log_night_eval: bool
     output_patient_csv: bool
+
+
+@dataclass
+class DatasetConfig:
+    colors: dict
+    aliases: dict
+
+    @staticmethod
+    def _normalize_key(name: str) -> str:
+        name = name.strip().lower()
+        name = re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', name)  # camelCase → camel Case
+        name = re.sub(r'[\s_\-]+', ' ', name)  # unify delimiters
+        return name
+
+    @classmethod
+    def from_yaml(cls, path: Path = Path(__file__).parent.joinpath('dataset_2_color.yaml')) -> 'DatasetConfig':
+        with open(path, 'r') as f:
+            config = yaml.safe_load(f)
+        aliases = {cls._normalize_key(k): v for k, v in config.get('aliases', {}).items()}
+        return cls(colors=config['datasets'], aliases=aliases)
+
+    def resolve(self, name: str):
+        key = self._normalize_key(name)
+        canonical = self.aliases.get(key, name)
+        return canonical, self.colors.get(canonical)
