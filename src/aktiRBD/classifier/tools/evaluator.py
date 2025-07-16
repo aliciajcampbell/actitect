@@ -24,12 +24,14 @@ logger = logging.getLogger(__name__)
 class Evaluator:
 
     def __init__(self, save_path: Path, experiment: ExperimentConfig, thresholds: dict,
-                 cv_mode: bool, output_patient_csv: bool = False, cv_config: NestedCVConfig = None):
+                 cv_mode: bool, output_patient_csv: bool = False, cv_config: NestedCVConfig = None, *,
+                 bootstrap_ci: bool = False):
 
         self.save_path = save_path
         self.experiment = experiment
         self.thresholds = thresholds  # numerical thresholds ({'night': <ClassThreshold>, 'patient': <ClassThreshold>})
         self.cv_mode = cv_mode
+        self.bootstrap_ci = bootstrap_ci
         self.cv_config = cv_config
         self.output_patient_csv = False if self.cv_mode else output_patient_csv
         if cv_mode:
@@ -108,9 +110,11 @@ class Evaluator:
         _key = f"pred({patient_agg})"
 
         _patient_pred_scoring = calc_evaluation_metrics(
-            per_patient_df['ground_truth'], y_prob=per_patient_df['mean_prob_per_night'], y_pred=per_patient_df[_key])
+            per_patient_df['ground_truth'], y_prob=per_patient_df['mean_prob_per_night'], y_pred=per_patient_df[_key],
+            bootstrap_ci=self.bootstrap_ci or not self.cv_mode)
         _patient_pred_scoring.update({
             'cm': metrics.confusion_matrix(per_patient_df['ground_truth'], per_patient_df[_key])})
+
         utils.dump_to_json(_patient_pred_scoring, self.save_path.joinpath('patient_scores.json'))
 
         # draw a roc and pr curve (in cv_mode, save an interpolated curve for averaging)
