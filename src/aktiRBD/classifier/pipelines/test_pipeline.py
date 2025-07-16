@@ -26,7 +26,6 @@ class TestPipeline(BasePipeline):
             logger.warning(f"training set in external test mode has {_.x.shape[0]} assigned samples.")
 
         for _path_models in self.config.pretrained_model_dirs:
-            # assert _
             if self.args.test:
                 self._run_eval(test, _path_models)
 
@@ -49,7 +48,8 @@ class TestPipeline(BasePipeline):
 
         _save_path = utils.check_make_dir(_save_path, use_existing=True, verbose=False)
         eval_manager = ModelManager(self.config, _save_path)
-        eval_manager.eval(test, model_dir)
+        filter_nights = not any(part.lower() == 'oxford' for part in self.args.processed_data_dir.parts)
+        eval_manager.eval(test, model_dir, filter_min_nights=filter_nights)
 
     def _run_predict(self, test: FeatureSet, model_dir: Path):
         _save_path = utils.check_make_dir(self.save_path.joinpath('external/predict'), True, False)

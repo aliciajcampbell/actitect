@@ -20,7 +20,7 @@ from aktiRBD.classifier.tools.classification_threshold import get_night_and_pati
 from aktiRBD.classifier.tools.evaluator import Evaluator
 from aktiRBD.classifier.tools.feature_set import FeatureSet
 from aktiRBD.classifier.tools.probability_calibration import CustomCalibratedClassifierCV
-from aktiRBD.config import PipelineConfig, ExternalTestConfig, ExperimentConfig
+from aktiRBD.config import PipelineConfig, ExternalTestConfig, ExperimentConfig, ModelConfig
 
 __all__ = ['ModelManager']
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ class ModelManager:
             self._output_patient_csv = self.config.final_model.output_patient_csv
 
             if any(exp.early_stopping for exp in self.config.final_model.experiments):
-                assert self.config.model.which == 'xgboost',\
+                assert self.config.model.which == 'xgboost', \
                     f"'early_stopping' option only available for 'xgboost' model."
 
             if any(exp.hp_setup_name != 'bayes_opt' for exp in self.config.final_model.experiments):
@@ -70,21 +70,33 @@ class ModelManager:
     def __str__(self):
         return f"ModelManager(random_state={self.random_state})"
 
-    def eval(self, test: FeatureSet, model_dict_file: Path, train: FeatureSet = None):
+    def eval(self, test: FeatureSet, model_dict_file: Path, train: FeatureSet = None, filter_min_nights: bool = True):
 
         assert model_dict_file.is_file() and model_dict_file.suffix == '.joblib', \
             f"Saved model file '{model_dict_file}' does not exist or is not a '.joblib' file."
         model_dict = joblib.load(model_dict_file)
 
-        with utils.custom_tqdm(total=len(model_dict)) as pbar:
+        with (utils.custom_tqdm(total=len(model_dict)) as pbar):
             pbar.set_description("[PROGRESS]: Inference")
             for _iteration in self._inference_iterator(test, model_dict, train):
                 _save_path, _exp, model, _, _, thresholds, train_processed, test_processed = _iteration
 
-                # run evaluator
-                evaluator = Evaluator(
-                    _save_path, _exp, thresholds, output_patient_csv=self._output_patient_csv, cv_mode=False)
-                evaluator.evaluate(train_processed, test_processed, generate_night_output=self._log_night_level)
+                if filter_min_nights:
+                    _min_n_nights = self.config.min_patient_nights_eval if isinstance(self.config, ExternalTestConfig) \
+                        else self.config.final_model.min_patient_nights_eval
+                    for _valid_set, _save_tag in [
+                        (test_processed, 'all'),
+                        (test_processed.filter_patients_min_nights(_min_n_nights), f'min_{_min_n_nights}_nights'),
+                    ]:
+                        _out_dir = utils.check_make_dir(_save_path.joinpath(_save_tag), True)
+                        ev = Evaluator(
+                            _out_dir, _exp, thresholds, output_patient_csv=self._output_patient_csv, cv_mode=False)
+                        ev.evaluate(train_data=None, valid_data=_valid_set, generate_night_output=self._log_night_level)
+                else:
+                    _out_dir = utils.check_make_dir(_save_path, True)
+                    ev = Evaluator(
+                        _out_dir, _exp, thresholds, output_patient_csv=self._output_patient_csv, cv_mode=False)
+                    ev.evaluate(train_data=None, valid_data=test_processed, generate_night_output=self._log_night_level)
 
                 pbar.update(1)
 
@@ -92,7 +104,7 @@ class ModelManager:
         """Like .eval() but will save the models to a given directory instead of evaluating them directly.
          Mainly used to create the final models for external testing."""
         # init model
-        self.model_setup = self._get_model_setup(self.config.model.which, train.y, self.random_state)
+        self.model_setup = self._get_model_setup(self.config.model, train.y, self.random_state)
         chosen_hp_setups = {exp.hp_setup_name for exp in self.config.final_model.experiments}
 
         # if specified, create a merged cologne training set (train + test), can only be used for external data testing
@@ -252,6 +264,7 @@ class ModelManager:
     def _inference_iterator(self, test: FeatureSet, model_dict: dict, train: FeatureSet = None):
         """Shared logic for .predict() and .eval(): loads models, processes the test (and train) data,
         runs prediction, and yields the common variables."""
+        assert model_dict, f"model_dict has to be provided but got '{model_dict}'."
         for exp_name, model_data in model_dict.items():
             _save_path = utils.check_make_dir(self.save_path.joinpath(exp_name), True, True)
             model = model_data['model']
@@ -306,10 +319,12 @@ class ModelManager:
         return {name: func() for name, func in hp_funcs.items()}
 
     @staticmethod
-    def _get_model_setup(model_name: str, y_train: np.ndarray, random_state: int):
+    def _get_model_setup(model_cfg: ModelConfig, y_train: np.ndarray, random_state: int):
         _n_hc_train_outer, _n_rbd_train_outer = np.unique(y_train, return_counts=True)[1]
         _cls_balance_outer = _n_hc_train_outer / _n_rbd_train_outer
-        return model_factory(model_name, cls_balance=_cls_balance_outer, seed=random_state)
+        return model_factory(
+            model_cfg.which, cls_balance=_cls_balance_outer, seed=random_state,
+            top_k_cfg=model_cfg.feature_selection.top_k_feats)
 
     def _get_bayes_opt_hps(self, train: FeatureSet, plot_search_history: bool = True):
         """ Perform Bayesian optimization on full training set to determine the best hyperparameters and selected

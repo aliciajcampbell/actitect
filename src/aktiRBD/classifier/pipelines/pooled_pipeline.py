@@ -6,7 +6,7 @@ import numpy as np
 from aktiRBD import utils
 from aktiRBD.classifier.pipelines import BasePipeline
 from aktiRBD.classifier.tools import ModelManager
-from aktiRBD.classifier.tools.nested_cv_new import KFoldNestedCV, LODONestedCV
+from aktiRBD.classifier.tools.nested_cv import KFoldNestedCV, LODONestedCV
 from aktiRBD.classifier.tools.feature_set import FeatureSet
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ class PooledTrainPipeline(BasePipeline):
         train, _, _ = self._load_data()
 
         # run regular k-fold and a lodo cv
-        for _cv in (KFoldNestedCV, LODONestedCV):
+        for _cv in (LODONestedCV, KFoldNestedCV):
             self._run_nested_cv(_cv, train)
 
         # produce final model(s) for testing

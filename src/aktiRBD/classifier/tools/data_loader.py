@@ -230,6 +230,7 @@ class DataLoader:
 
     def _get_meta(self, meta_csv_path: Path):
         # read meta file
+
         meta_df = utils.read_meta_csv_to_df(meta_csv_path, exclude=True, verbose=self.verbose)
 
         assert 'diagnosis' in meta_df.columns, f"'meta_df' at {meta_csv_path} must contain a 'diagnosis' column."
@@ -295,7 +296,7 @@ class DataLoader:
     @staticmethod
     def _infer_dataset_dir_mapping(meta_df: pd.DataFrame, patient_dirs: List[Path]) -> dict:
         """Get mapping from dataset_id to patient_dir using file existence checks.
-         Only relevant if self.is_pooled_dataset"""
+         Allows multiple dataset_ids to share the same directory."""
         dir_to_dataset_ids = defaultdict(set)
         for p_dir in patient_dirs:
             for _, row in meta_df.iterrows():
@@ -306,15 +307,18 @@ class DataLoader:
         patient_dir_to_dataset_id = {}
         for p_dir, ds_ids in dir_to_dataset_ids.items():
             if len(ds_ids) != 1:
-                raise ValueError(f"Directory {p_dir} maps to multiple dataset_ids: {ds_ids}")
-            patient_dir_to_dataset_id[p_dir] = list(ds_ids)[0]
-        mapped_dataset_ids = set(patient_dir_to_dataset_id.values())
+                logger.warning(f"Directory {p_dir} maps to multiple dataset_ids: {ds_ids}")
+            for ds_id in ds_ids:
+                patient_dir_to_dataset_id[ds_id] = p_dir
+
+        mapped_dataset_ids = set(patient_dir_to_dataset_id.keys())
         all_dataset_ids = set(meta_df['dataset_id'].unique())
 
         if mapped_dataset_ids != all_dataset_ids:
             missing = all_dataset_ids - mapped_dataset_ids
             raise ValueError(f"No matching patient_dir found for dataset_ids: {missing}")
-        return {v: k for k, v in patient_dir_to_dataset_id.items()}
+
+        return patient_dir_to_dataset_id
 
     def _handle_problematic_values(self, df, df_log_name: str, drop: bool, replace: dict, excluded_cols: List[str]):
         """ Handles problematic values in a DataFrame by either dropping the rows or replacing the values.

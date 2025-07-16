@@ -2,7 +2,9 @@ import logging
 
 from aktiRBD import utils
 from aktiRBD.classifier.pipelines import BasePipeline
-from aktiRBD.classifier.tools import NestedCV, ModelManager
+from aktiRBD.classifier.tools import ModelManager
+# from aktiRBD.classifier.tools.nested_cv_legacy import NestedCV  # todo: use refactored Abstract class!
+from aktiRBD.classifier.tools import KFoldNestedCV
 from aktiRBD.classifier.tools.feature_set import FeatureSet
 
 logger = logging.getLogger(__name__)
@@ -32,7 +34,7 @@ class TrainPipeline(BasePipeline):
 
     def _run_nested_cv(self, train: FeatureSet):
         _save_path_cv = utils.check_make_dir(self.save_path.joinpath('nested_cv'), True)
-        nested_cv = NestedCV(self.config, save_path=_save_path_cv)
+        nested_cv = KFoldNestedCV(self.config, save_path=_save_path_cv)
         logger.info(f"starting nested cross-validation: {nested_cv}")
         with utils.Timer() as timer:
             nested_cv.fit(train.copy())
@@ -46,6 +48,6 @@ class TrainPipeline(BasePipeline):
 
     def _run_eval(self, test: FeatureSet):
         _save_path_test_cgn = utils.check_make_dir(self.save_path.joinpath('test_cgn'), True)
-        _load_path_models = self.save_path.joinpath('models/models_cgn_train.joblib')
+        _load_path_models = self.save_path.joinpath('models/models_cgn.joblib')
         model_manager_eval = ModelManager(self.config, _save_path_test_cgn)
         model_manager_eval.eval(test, _load_path_models)

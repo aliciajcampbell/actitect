@@ -14,7 +14,7 @@ import time
 import traceback
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Dict, Union, Hashable, Any
+from typing import Dict, Union, Hashable, Any, Tuple
 
 import joblib
 import numpy as np
@@ -33,7 +33,6 @@ try:
     NUMBA_AVAILABLE = True
 except ImportError:  # numba not installed
     NUMBA_AVAILABLE = False
-
 
     # dummy decorator that accepts the same signature as njit(...)
     def _numba_njit(*args, **kwargs):
@@ -77,7 +76,8 @@ __all__ = [
     'list_subdirectories',
     'compute_pearson_ci',
     'compute_mean_std_ci',
-    'optional_njit'
+    'optional_njit',
+    'sensitivity_specificity_from_cm'
 ]
 
 logger = logging.getLogger(__name__)
@@ -265,12 +265,14 @@ def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False, verbose: bool 
         flagged = out[out[col] == '1']
         if log and len(flagged):
             ids = flagged['ID'].tolist() if 'ID' in flagged.columns else flagged.index.tolist()
-            logger.info("Found %d row(s) with exclude == 1. IDs: %s", len(flagged), ids)
+            status = "will be dropped" if drop else "will be kept"
+            logger.info(f"Found {len(flagged)} row(s) with exclude == 1 ({status}). IDs: {ids}")
 
         if drop:
-            out = out[out[col] != '1']  # keep '0' and '?'
+            out = out[out[col] != '1']
 
         return out
+
 
     def _assign_record_ID(group: pd.DataFrame, ID_value: str):
         """ Assigns unique recording IDs for patients with multiple recordings.
@@ -951,3 +953,13 @@ def optional_njit(*args, **kwargs):
     """Decorate a function with numba.njit if Numba is present,
     otherwise leave it as plain Python."""
     return _numba_njit(*args, **kwargs)
+
+def sensitivity_specificity_from_cm(cm: np.ndarray) -> Tuple[float, float]:
+    """ Compute sensitivity (recall) and specificity from a 2×2 confusion matrix"""
+    cm = np.asarray(cm)
+    if cm.shape != (2, 2):
+        raise ValueError(f"Expected 2×2 matrix, got shape {cm.shape}")
+    tn, fp, fn, tp = cm.ravel()
+    sensitivity = tp / (tp + fn) if (tp + fn) > 0 else np.nan
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else np.nan
+    return sensitivity, specificity
