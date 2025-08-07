@@ -120,7 +120,16 @@ def calc_evaluation_metrics(
         _vals = boot_vals[k][~np.isnan(boot_vals[k])]
         if len(_vals) <= 1:
             continue
+
         mean, std, ci_lo, ci_hi, margin = compute_mean_std_ci(_vals, confidence_level)
+
+        # store original full-sample value from point estimate
+        metrics[k + '_point'] = metrics[k]
+
+        # overwrite main entry with bootstrap mean
+        metrics[k] = mean
+
+        # Store bootstrap-based statistics
         metrics[k + '_std'] = std
         metrics[k + '_ci'] = [ci_lo, ci_hi]
         metrics[k + '_margin'] = margin
