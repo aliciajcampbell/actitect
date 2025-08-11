@@ -14,7 +14,8 @@ import time
 import traceback
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Dict, Union, Hashable, Any, Tuple
+from typing import Dict, Union, Any, Tuple
+from typing import Iterable, Optional
 
 import joblib
 import numpy as np
@@ -33,6 +34,7 @@ try:
     NUMBA_AVAILABLE = True
 except ImportError:  # numba not installed
     NUMBA_AVAILABLE = False
+
 
     # dummy decorator that accepts the same signature as njit(...)
     def _numba_njit(*args, **kwargs):
@@ -221,7 +223,6 @@ def detect_csv_delimiter(filepath: Union[str, Path], *, sample_size: int = 1 << 
 
 
 def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False, verbose: bool = True):
-
     def _row_has_valid_filename(row):
         from aktiRBD.actimeter import SUPPORTED_FILETYPES
         return any(str(row['filename']).endswith(ext) for ext in SUPPORTED_FILETYPES)
@@ -273,7 +274,6 @@ def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False, verbose: bool 
 
         return out
 
-
     def _assign_record_ID(group: pd.DataFrame, ID_value: str):
         """ Assigns unique recording IDs for patients with multiple recordings.
         Preserves user-defined values where present. """
@@ -290,6 +290,54 @@ def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False, verbose: bool 
             group.loc[group['record_ID'].isna(), 'record_ID'] = new_ids[:group['record_ID'].isna().sum()]
 
         return group
+
+    def _summary_note_mask(
+            df: pd.DataFrame,
+            *,
+            min_nonempty: int = 2,  # keep rows with at least this many non-empty cells
+            numeric_match_frac: float = 0.8,  # row matches ≥ this frac of numeric column aggregates
+            tokens: Optional[Iterable[str]] = None,  # tokens marking totals/notes, any language
+            tol: float = 1e-9,
+    ) -> pd.Series:
+        """
+        Heuristics to flag Excel-style totals/subtotals/notes rows without assuming ID patterns.
+        Flags a row if ANY of:
+          (A) 'totals/notes' tokens present,
+          (B) row matches column aggregates (sum/count) in ≥ numeric_match_frac numeric cols,
+          (C) row is mostly empty (non-empty cells < min_nonempty).
+        """
+        if tokens is None:
+            tokens = ("total", "subtotal", "sum", "gesamt", "Σ", "note", "notes", "comment")
+        tokens = tuple(t.lower() for t in tokens)
+
+        # (A) token hit anywhere (string cells)
+        str_df = df.astype(object).where(~df.applymap(lambda x: isinstance(x, (list, dict, set))))
+        str_mask = str_df.applymap(lambda x: str(x).lower() if isinstance(x, str) else x)
+        token_hit = str_mask.apply(
+            lambda r: any(isinstance(v, str) and any(t in v for t in tokens) for v in r), axis=1
+        )
+
+        # (B) numeric-aggregate match (sum or count)
+        num_cols = df.select_dtypes(include=[np.number]).columns
+        if len(num_cols):
+            sums = df[num_cols].sum(numeric_only=True)
+            counts = df[num_cols].notna().sum()
+
+            def _match_frac(row: pd.Series) -> float:
+                eq_sum = (row[num_cols] - sums).abs() <= tol
+                eq_cnt = (row[num_cols] - counts).abs() <= tol
+                return np.nanmean((eq_sum | eq_cnt).to_numpy())  # fraction matched
+
+            frac = df.apply(_match_frac, axis=1)
+            agg_match = frac.fillna(0) >= numeric_match_frac
+        else:
+            agg_match = pd.Series(False, index=df.index)
+
+        # (C) mostly empty row
+        nonempty_per_row = df.apply(lambda r: sum(str(v).strip() != "" and pd.notna(v) for v in r), axis=1)
+        mostly_empty = nonempty_per_row < min_nonempty
+
+        return token_hit | agg_match | mostly_empty
 
     delimiter = detect_csv_delimiter(path_to_csv)
     meta_df = pd.read_csv(path_to_csv, delimiter=delimiter)
@@ -320,9 +368,11 @@ def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False, verbose: bool 
     if 'record_ID' not in meta_df.columns:
         meta_df['record_ID'] = None
 
-    # drop last row if it is a summary row (simply check if last row contains a valid filename or not)
-    if not _row_has_valid_filename(meta_df.iloc[-1]):
-        meta_df = meta_df.iloc[:-1].copy()
+    mask = _summary_note_mask(meta_df, min_nonempty=2, numeric_match_frac=.8)
+    if mask.any():
+        logger.warning(f"Detected {mask.sum()} potential summary row(s) in metadata CSV;"
+                       f" they will be dropped – verify if intended.")
+        meta_df = meta_df.loc[~mask].copy()
 
     meta_df = meta_df.groupby('ID', group_keys=False).apply(
         lambda g: _assign_record_ID(g, g.name), include_groups=False)
@@ -954,6 +1004,7 @@ def optional_njit(*args, **kwargs):
     otherwise leave it as plain Python."""
     return _numba_njit(*args, **kwargs)
 
+
 def sensitivity_specificity_from_cm(cm: np.ndarray) -> Tuple[float, float]:
     """ Compute sensitivity (recall) and specificity from a 2×2 confusion matrix"""
     cm = np.asarray(cm)
@@ -963,3 +1014,4 @@ def sensitivity_specificity_from_cm(cm: np.ndarray) -> Tuple[float, float]:
     sensitivity = tp / (tp + fn) if (tp + fn) > 0 else np.nan
     specificity = tn / (tn + fp) if (tn + fp) > 0 else np.nan
     return sensitivity, specificity
+
