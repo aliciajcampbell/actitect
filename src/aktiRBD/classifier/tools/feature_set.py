@@ -60,8 +60,9 @@ class FeatureSet:
 
         new_x = self.x[:, selected_indices]
         new_feat_map = self.feat_map[selected_indices]
-        return FeatureSet(x=new_x, y=self.y, group=self.group, feat_map=new_feat_map,
-                          process_params=self.process_params, prob=self.prob)
+        return FeatureSet(
+            x=new_x, y=self.y, group=self.group, feat_map=new_feat_map,
+            process_params=self.process_params, prob=self.prob, dataset=self.dataset)
 
     def select_samples(self, sample_indices):
         """ Select a subset of samples based on provided indices.
@@ -186,7 +187,8 @@ class FeatureSet:
                 if len(self.dataset) != len(self.y):
                     print(self.dataset)
                     print(self.y)
-                    raise ValueError(f"Length mismatch between `data.dataset` ({self.dataset.shape}) and `data.y` ({self.y.shape}).")
+                    raise ValueError(
+                        f"Length mismatch between `data.dataset` ({self.dataset.shape}) and `data.y` ({self.y.shape}).")
 
                 dtype = f"<U{max(map(len, self.dataset.astype(str))) + max(map(len, self.y.astype(str))) + 1}"
                 sep = np.full(len(self.y), "_", dtype=dtype)
@@ -199,6 +201,16 @@ class FeatureSet:
             y_strat = self.y
 
         return y_strat
+
+    def get_feature_indices(self, feature_names: list[str]) -> list[int]:
+        """Return indices for the given feature names, using feat_map."""
+        if self.feat_map is None:
+            raise ValueError("feat_map must be set to resolve feature indices.")
+        name_to_idx = {name: i for i, name in enumerate(self.feat_map)}
+        try:
+            return [name_to_idx[name] for name in feature_names]
+        except KeyError as e:
+            raise KeyError(f"Feature {e} not found in feat_map.")
 
     def _apply_scaler(self, scaler_info: Optional[dict] = None):
         """ Applies scaling to the FeatureSet using the specified or precomputed scaler parameters.
