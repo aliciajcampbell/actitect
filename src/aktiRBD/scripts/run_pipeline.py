@@ -24,10 +24,11 @@ def _run_setup():
         # arguments that define the operation mode of the script:
         group = parser.add_mutually_exclusive_group(required=False)  # to enable default
         group.add_argument('--train_eval', action='store_true',
-                           help='Run the entire training pipeline on cologne data: nested cv on train set + train model on entire'
-                                ' train set to eval on test set. ')
+                           help='Run the entire training pipeline on cologne data: '
+                                'nested cv on train set + train model on entire train set to eval on test set. ')
         group.add_argument('--train_pooled', action='store_true',
-                           help='Run a training pipeline on a pooled multi-center dataset (several processed-data folders jointly).')
+                           help='Run a training pipeline on a pooled multi-center dataset'
+                                ' (several processed-data folders jointly).')
         group.add_argument('--test', action='store_true',
                            help='Use pretrained models to test on unseen data. (Default)')
         group.add_argument('--predict', action='store_true', help='Only run inference, no testing.')
@@ -43,13 +44,20 @@ def _run_setup():
 
         parser.add_argument('-d', '--processed_data_dir', type=str, nargs='+', metavar='DIR',
                             default=['./data/processed/'],  # rel. to root dir
-                            help='directory (rel. to root) containing the pre-processed data. Each patient may have subdirectories '
-                                 'corresponding to multiple recordings.')
+                            help='directory (rel. to root) containing the pre-processed data. '
+                                 'Each patient may have subdirectories corresponding to multiple recordings.')
+
+        parser.add_argument('--output_dir', type=str, default=None,
+                            help="If set, write results exactly to this directory (no auto-generated timestamp).")
 
         parser.add_argument('-m', '--meta_file', type=str, metavar='FILE',
                             default='./data/raw/meta/metadata.csv',  # rel. to root dir
-                            help="meta data file path (rel. to root) that contains list of patients. Has to contain the class labels"
-                                 " except for execution in 'predict' mode. ")
+                            help="meta data file path (rel. to root) that contains list of patients."
+                                 " Has to contain the class labels except for execution in 'predict' mode. ")
+
+        parser.add_argument('-ds', '--dataset_tag', type=str, default='external',
+                            help="Tag used to identify the dataset (used only in test mode, e.g. 'cologne', 'oxford',"
+                                 " ...).")
 
         _args = parser.parse_args()
 
@@ -79,9 +87,19 @@ def _run_setup():
     args = __parse_args()
 
     run_mode = next(m for f, m in FLAG2MODE.items() if getattr(args, f))
-    _experiment_id = f"{run_mode}_{datetime.datetime.now().strftime('%Y-%m-%d_%Hh%Mm%Ss')}"
-    root_save_path = utils.check_make_dir(Path(args.root_dir).joinpath(f"results/pipeline/run_{_experiment_id}"))
+    if args.output_dir:
+        root_save_path = utils.check_make_dir(Path(args.output_dir))
+        # experiment_id = root_save_path.name
+        logger.warning("Overriding default results directory. Writing to: %s", root_save_path)
+    else:
+        ts = datetime.datetime.now().strftime('%Y-%m-%d_%Hh%Mm%Ss')
+        experiment_id = f"{run_mode}_{ts}"
+        root_save_path = utils.check_make_dir(
+            Path(args.root_dir).joinpath(f"results/pipeline/run_{experiment_id}"))
+
     utils.setup_logging(log_file_path=root_save_path.joinpath('log'))
+    if args.output_dir:
+        logger.warning("Overriding default results directory. Writing to: %s", root_save_path)
 
     if args.train_eval or args.train_pooled:
         config = PipelineConfig.from_yaml(args.config_file)
