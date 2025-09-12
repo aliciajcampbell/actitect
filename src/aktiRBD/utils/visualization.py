@@ -242,7 +242,9 @@ def draw_roc_or_pr_curve(x: np.ndarray, y: np.ndarray, thres: np.ndarray, mode: 
 
 
 def draw_cv_roc_or_pr_curve(
-        curve_dict: dict, mode: str, cl: float = .95, *, display_op_point: bool = False, lodo_labels: dict = None):
+        curve_dict: dict, mode: str, cl: float = .95,
+        *, display_op_point: bool = False,
+        lodo_labels: dict = None, strip_axis: bool = False, lw: float = 1.7) -> plt.Figure:
     if mode == 'roc':
         x, y = np.array(curve_dict['fpr']), np.array(curve_dict['tpr'])
         metric, op_point = np.array(curve_dict['auc']), np.array(curve_dict['op_point'])
@@ -260,7 +262,10 @@ def draw_cv_roc_or_pr_curve(
 
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(7, 7))
     fig.set_facecolor('none')
-    plt.subplots_adjust(left=.17, right=.97, top=.95, bottom=.14)
+    if not strip_axis:
+        plt.subplots_adjust(left=.17, right=.97, top=.95, bottom=.14)
+    else:
+        plt.subplots_adjust(left=.07, right=.98, top=.99, bottom=.04)
     ax.set_xlim(-.045, 1.045)
     ax.tick_params(axis='both', which='major', direction='in', length=6, width=2, top=True, right=True, labelsize=15)
     ax.minorticks_on()
@@ -293,7 +298,7 @@ def draw_cv_roc_or_pr_curve(
                 style_by_dataset[ds_name] = next(STYLE_CYCLER)
             ds_style = style_by_dataset[ds_name]
             # label = f"{ds_name} \n(AUC = {val:.2f})" if mode == 'roc' else f"{ds_name} (F1 = {val:.2f})"
-            ax.plot(x, _y, lw=1, zorder=400, color=ds_color, ls=ds_style, alpha=.85)  # , label=label)
+            ax.plot(x, _y, lw=lw, zorder=400, color=ds_color, ls=ds_style, alpha=.85)  # , label=label)
             line = Line2D([0], [0], color=ds_color, lw=3, linestyle=ds_style)
 
             ds_label = f"{ds_name}"  # left-aligned name
@@ -306,15 +311,15 @@ def draw_cv_roc_or_pr_curve(
             ax.plot(x, _y, lw=.7, zorder=100, color='grey', linestyle='-', alpha=.35)
 
     if is_lodo:
-        _color = 'grey'
-        mean_line, = ax.plot(x, mean_y, lw=.5, zorder=100, color=_color, linestyle='-', alpha=.3, label=_line_label)
+        _color = 'k'
+        mean_line, = ax.plot(x, mean_y, lw=lw - 1, zorder=100, color=_color, linestyle='-', alpha=.7, label=_line_label)
         ax.fill_between(x, y_lower, y_upper, zorder=150, color=_color, alpha=.1)
         # label=rf"$ {cl * 100:.0f}\% \,CI\,(\sigma={std:.2f})$")
         # custom_handles.append(Line2D([0], [0], color='gray', lw=2, linestyle='--'))
         ci_patch = Patch(facecolor=_color, alpha=.2)
         custom_handles.append((ci_patch, mean_line))  # a *tuple*
         custom_labels.append(
-            rf"{'mean'} (${mean:.2f}^{{\,+{ci_upper - mean:.2f}}}_{{\,-{mean - ci_lower:.2f}}})$") #, \sigma={std:.2f})$")
+            rf"{'mean'} (${mean:.2f}^{{\,+{ci_upper - mean:.2f}}}_{{\,-{mean - ci_lower:.2f}}})$")  #, \sigma={std:.2f})$")
 
     else:
         ax.plot(x, mean_y, lw=1, zorder=200, color=_c, linestyle='-', alpha=1.0, label=_line_label)
@@ -338,7 +343,7 @@ def draw_cv_roc_or_pr_curve(
                 handles=custom_handles,
                 labels=custom_labels,
                 loc='lower right',
-                fontsize=16,
+                fontsize=18,
                 handlelength=1.8,
                 borderaxespad=.4,
                 frameon=False,
@@ -351,8 +356,9 @@ def draw_cv_roc_or_pr_curve(
             legend.get_title().set_ha('left')
         else:
             ax.legend(loc=(.4, .1), fontsize=15, frameon=False)
-        ax.set_ylabel('True Positive Rate (Sensitivity)', fontsize=16, labelpad=20)
-        ax.set_xlabel('False Positive Rate (1-Specifity)', fontsize=16, labelpad=20)
+        if not strip_axis:
+            ax.set_ylabel('True Positive Rate (Sensitivity)', fontsize=16, labelpad=20)
+            ax.set_xlabel('False Positive Rate (1-Specifity)', fontsize=16, labelpad=20)
 
     elif mode == 'pr':
         _mean_pos_frac = np.min(mean_y)
@@ -367,8 +373,7 @@ def draw_cv_roc_or_pr_curve(
 
 
 def draw_cv_boxplot(history: dict, ylims=(.5, 1), cl: float = .90):
-
-    history = {k:v for k,v in history.items() if k in (
+    history = {k: v for k, v in history.items() if k in (
         'accuracy', 'balanced_accuracy', 'roc_auc', 'f1', 'recall', 'precision', 'average_precision')}
 
     names, data = [], []
