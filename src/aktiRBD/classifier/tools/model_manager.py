@@ -14,7 +14,7 @@ from skopt.plots import plot_convergence, plot_evaluations, plot_objective
 from skopt.space import Integer, Real, Categorical
 
 from aktiRBD import utils
-from aktiRBD.classifier.models import model_factory
+from aktiRBD.classifier.models import ModelFactory
 from aktiRBD.classifier.tools import BayesianOptCV
 from aktiRBD.classifier.tools.classification_threshold import get_night_and_patient_threshold
 from aktiRBD.classifier.tools.evaluator import Evaluator
@@ -322,9 +322,9 @@ class ModelManager:
     def _get_model_setup(model_cfg: ModelConfig, y_train: np.ndarray, random_state: int):
         _n_hc_train_outer, _n_rbd_train_outer = np.unique(y_train, return_counts=True)[1]
         _cls_balance_outer = _n_hc_train_outer / _n_rbd_train_outer
-        return model_factory(
-            model_cfg.which, cls_balance=_cls_balance_outer, seed=random_state,
+        model_factory = ModelFactory(model_cfg.which, cls_balance=_cls_balance_outer, seed=random_state,
             top_k_cfg=model_cfg.feature_selection.top_k_feats)
+        return model_factory.build()
 
     def _get_bayes_opt_hps(self, train: FeatureSet, plot_search_history: bool = True):
         """ Perform Bayesian optimization on full training set to determine the best hyperparameters and selected

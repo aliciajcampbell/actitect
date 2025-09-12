@@ -14,7 +14,7 @@ from scipy import stats
 from sklearn.preprocessing import MinMaxScaler
 
 from aktiRBD import utils
-from aktiRBD.classifier import model_factory
+from aktiRBD.classifier import ModelFactory
 from aktiRBD.classifier.tools.feature_set import FeatureSet
 from aktiRBD.config import DataConfig
 from aktiRBD.external.boruta_py.boruta import BorutaPy
@@ -199,8 +199,9 @@ class FeatureRanker:
             _out_dir = utils.check_make_dir(self.out_dir.joinpath('boruta/'), True)
 
             n_hc_train, n_rbd_train = np.unique(self.data.y, return_counts=True)[1]
-            model_setup = model_factory(
+            model_factory = ModelFactory(
                 proxy_model, cls_balance=n_hc_train / n_rbd_train, seed=self.random_state, top_k_cfg=None)
+            model_setup = model_factory.build()
             model = model_setup.model().set_params(**model_setup.default_params)
 
             boruta_history = []
