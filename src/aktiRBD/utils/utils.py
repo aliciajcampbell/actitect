@@ -13,6 +13,7 @@ import sys
 import time
 import traceback
 from contextlib import contextmanager
+from math import comb
 from pathlib import Path
 from typing import Dict, Union, Any, Tuple
 from typing import Iterable, Optional
@@ -79,7 +80,8 @@ __all__ = [
     'compute_pearson_ci',
     'compute_mean_std_ci',
     'optional_njit',
-    'sensitivity_specificity_from_cm'
+    'sensitivity_specificity_from_cm',
+    'fischer_freeman_hilton_exact_test'
 ]
 
 logger = logging.getLogger(__name__)
@@ -134,6 +136,7 @@ def setup_logging(config_path=Path(__file__).parents[1].joinpath('config/logging
         if log_file_path:  # set output log file location
             timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%Hh%Mm%Ss')
             _unique_log_path = log_file_path.with_name(f"{log_file_path.stem}_{timestamp}{log_file_path.suffix}")
+            check_make_dir(_unique_log_path.parent, use_existing=True)
             _log_config['handlers']['file'].update({'filename': _unique_log_path})
         else:  # disable file logging and only print console logging
             _log_config['loggers']['aktiRBD'].update({'handlers': ['console']})
@@ -311,12 +314,17 @@ def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False, verbose: bool 
         tokens = tuple(t.lower() for t in tokens)
 
         # (A) token hit anywhere (string cells)
-        str_df = df.astype(object).where(~df.applymap(lambda x: isinstance(x, (list, dict, set))))
-        str_mask = str_df.applymap(lambda x: str(x).lower() if isinstance(x, str) else x)
-        token_hit = str_mask.apply(
-            lambda r: any(isinstance(v, str) and any(t in v for t in tokens) for v in r), axis=1
+        str_df = df.astype(object).where(
+            ~df.apply(lambda col: col.map(lambda x: isinstance(x, (list, dict, set))))
         )
+        # Lowercase only strings
+        str_mask = str_df.apply(lambda col: col.map(lambda x: str(x).lower() if isinstance(x, str) else x))
 
+        # Token detection
+        token_hit = str_mask.apply(
+            lambda r: any(isinstance(v, str) and any(t in v for t in tokens) for v in r),
+            axis=1
+        )
         # (B) numeric-aggregate match (sum or count)
         num_cols = df.select_dtypes(include=[np.number]).columns
         if len(num_cols):
@@ -361,7 +369,7 @@ def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False, verbose: bool 
     meta_df = _handle_exclusion(meta_df, drop=exclude, log=verbose)
 
     # ensure required columns exist:
-    required_cols = {'filename', 'ID'}
+    required_cols = {'filename', 'ID', 'diagnosis'}
     missing_cols = required_cols - set(meta_df.columns)
     if missing_cols:
         raise ValueError(f"Metadata file is missing required columns: {missing_cols}")
@@ -1015,3 +1023,66 @@ def sensitivity_specificity_from_cm(cm: np.ndarray) -> Tuple[float, float]:
     specificity = tn / (tn + fp) if (tn + fp) > 0 else np.nan
     return sensitivity, specificity
 
+
+def fischer_freeman_hilton_exact_test(table: np.ndarray) -> float:
+    """ Exact two-sided Fisher–Freeman–Halton test for an R×2 contingency table.
+    The p-value is the sum of probabilities of all tables with the same row totals
+    and first-column total whose hypergeometric probability is ≤ that of the observed
+    table. Implemented via depth-first enumeration with integer-only comparisons,
+    early pruning, and row reordering for speed.
+    Parameters
+        :param table: (array_like), shape (R, 2) Non-negative integer counts.
+    Returns
+        :return: (float) Two sided p-value. """
+    T = np.asarray(table, dtype=int)
+    if T.ndim != 2 or T.shape[1] != 2 or T.size == 0:
+        raise ValueError("`table` must be an R×2 array with non-negative integers.")
+    if (T < 0).any():
+        raise ValueError("Counts must be non-negative.")
+
+    R = T.shape[0]
+    row_tot = T.sum(axis=1)
+    col1_tot = int(T[:, 0].sum())
+    N = int(row_tot.sum())
+
+    # Visit larger rows first → stronger pruning.
+    order = np.argsort(-row_tot)
+    row_tot = row_tot[order]
+    col1_obs = T[:, 0][order].tolist()
+
+    # Precompute C(n,k) per row.
+    C = [[comb(row_tot[i], k) for k in range(row_tot[i] + 1)] for i in range(R)]
+
+    # Observed numerator (denominator cancels when comparing probabilities).
+    num_obs = 1
+    for i, xi in enumerate(col1_obs):
+        num_obs *= C[i][xi]
+    total_num = 0  # accumulated numerator mass over allocations ≤ observed
+    def _dfs(i: int, remaining: int, num_so_far: int) -> None:
+        nonlocal total_num
+        if i == R - 1:
+            xi = remaining
+            if 0 <= xi <= row_tot[i]:
+                num = num_so_far * C[i][xi]
+                if num <= num_obs:
+                    total_num += num
+            return
+
+        # Feasible range for this row.
+        tail = int(row_tot[i + 1:].sum())
+        lo = max(0, remaining - tail)
+        hi = min(row_tot[i], remaining)
+
+        # Try ks in order of decreasing C(n,k) to trigger pruning earlier.
+        ks = range(lo, hi + 1)
+        ks = sorted(ks, key=lambda k: -C[i][k]) if lo != hi else ks
+        for xi in ks:
+            num_next = num_so_far * C[i][xi]
+            if num_next > num_obs:  # prune branch
+                continue
+            _dfs(i + 1, remaining - xi, num_next)
+
+    _dfs(0, col1_tot, 1)
+
+    # Convert summed numerators to probability once.
+    return total_num / comb(N, col1_tot)
