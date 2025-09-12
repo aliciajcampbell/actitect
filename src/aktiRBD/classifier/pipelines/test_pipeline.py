@@ -36,8 +36,8 @@ class TestPipeline(BasePipeline):
     def _run_eval(self, test: FeatureSet, model_dir: Path, case: str = None):
 
         # 'case' argument deprecated, was needed for Oxford testing with dominant vs non-dominant hand...
-        _save_path = self.save_path.joinpath('external/eval') if case is None \
-            else self.save_path.joinpath(f"external/eval/{case}")
+        _save_path = self.save_path.joinpath(f"{self.args.dataset_tag}/eval") if case is None \
+            else self.save_path.joinpath(f"{self.args.dataset_tag}/eval/{case}")
         if case:
             logger.info(f'starting inference for {case} case:')
 
@@ -48,8 +48,7 @@ class TestPipeline(BasePipeline):
 
         _save_path = utils.check_make_dir(_save_path, use_existing=True, verbose=False)
         eval_manager = ModelManager(self.config, _save_path)
-        filter_nights = not any(part.lower() == 'oxford' for part in self.args.processed_data_dir.parts)
-        eval_manager.eval(test, model_dir, filter_min_nights=filter_nights)
+        eval_manager.eval(test, model_dir)
 
     def _run_predict(self, test: FeatureSet, model_dir: Path):
         _save_path = utils.check_make_dir(self.save_path.joinpath('external/predict'), True, False)

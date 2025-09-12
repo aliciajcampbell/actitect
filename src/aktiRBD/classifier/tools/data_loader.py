@@ -236,9 +236,14 @@ class DataLoader:
         assert 'diagnosis' in meta_df.columns, f"'meta_df' at {meta_csv_path} must contain a 'diagnosis' column."
         _is_null = meta_df.diagnosis.isnull()
         assert not meta_df.diagnosis.isnull().any(), "'diagnosis' column contains NaN values."
-        assert set(self.binary_mapping.keys()).issubset(set(meta_df['diagnosis'].unique())), \
-            (f"Mapping values {set(self.binary_mapping.keys())} are not a subset of "
-             f"diagnosis values {set(meta_df['diagnosis'].unique())}.")
+
+        mapping_keys, data_keys = set(self.binary_mapping.keys()), set(meta_df['diagnosis'].unique())
+        unused_keys = mapping_keys - data_keys
+        if unused_keys: # keys defined in mapping but not present in the data
+            logger.warning(f"Mapping keys not present in this dataset: {unused_keys}")
+        unmapped_keys = data_keys - mapping_keys
+        if unmapped_keys:  # Keys present in the data but not covered by the mapping
+            logger.warning(f"Dataset contains diagnoses not covered by mapping: {unmapped_keys}")
         # choose only relevant rows according to binary_mapping, will drop all other rows
         orig_counts = meta_df['diagnosis'].value_counts().to_dict()
         if self.verbose:

@@ -38,13 +38,16 @@ def cv_iterator(
     for k, (train_indices, val_indices) in enumerate(cv_instance.split(X=data.x, y=y_strat, groups=groups_used)):
         train_fold = Fold(name=f"train", k=k, feature_set=data.select_samples(train_indices))
         valid_fold = Fold(name=f"valid", k=k, feature_set=data.select_samples(val_indices))
-        if process_kwargs is not None and rank_kwargs is not None:
+        if process_kwargs is not None:
 
             processed_train_fold = train_fold.copy().fit_transform(rank_kwargs=rank_kwargs, **process_kwargs)
             processed_valid_fold = valid_fold.copy().transform(processed_train_fold.process_params)
-            assert isinstance(processed_train_fold.feat_rank, dict), (
-                "'feat_rank' property of the training Fold must be a populated dictionary, "
-                f"but got {type(processed_train_fold.feat_rank)} with value {processed_train_fold.feat_rank}")
+            if processed_train_fold.feat_rank is None:
+                logger.debug("No feature ranking (likely fixed-features mode). Skipping feat_rank check.")
+            else:
+                assert isinstance(processed_train_fold.feat_rank, dict) and processed_train_fold.feat_rank, (
+                    f"'feat_rank' must be a populated dict if feature ranking is used, got {type(processed_train_fold.feat_rank)}"
+                )
         else:
             processed_train_fold, processed_valid_fold = train_fold, valid_fold
             logger.warning("No processing or feature ranking kwargs provided. Skipping feature processing.")

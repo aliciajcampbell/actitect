@@ -16,9 +16,14 @@ data:
     use_smote: True
 
   loader:
-    binary_mapping: {'HC': 0, 'RBD': 1}
-    # binary_mapping: {'HC': 0, 'PD-RBD': 1}
-    # binary_mapping:  {'HC': 0, 'PD-RBD': 1, 'RBD': 1}
+    binary_mapping:  {'HC': 0, 'PD-RBD': 0, 'PD+RBD': 1, 'iRBD': 1}
+    # binary_mapping: {'HC': 0, 'iRBD': 1}
+    # binary_mapping:  {'HC': 0, 'PD-RBD': 0, 'PD+RBD': 1, 'iRBD': 1}
+    # binary_mapping:  {'HC': 0, 'PD-RBD': 0, 'PD+RBD': 1}
+    # binary_mapping:  {'PD-RBD': 0, 'PD+RBD': 1}
+    # binary_mapping:  {'HC': 0, 'PD+RBD': 1, 'iRBD': 1}
+    # binary_mapping: {'HC': 0, 'PD+RBD': 1}
+    # binary_mapping:  {'HC': 0, 'PD+RBD': 1, 'RBD': 1}
     # 'binary_mapping' defined the classification task, i.e. RBD vs HC, PD vs HC, etc.
 
     feature_dir: './features/per_night'  # relative to patient_dir

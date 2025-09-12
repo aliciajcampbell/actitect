@@ -17,7 +17,7 @@ from sklearn.model_selection import StratifiedGroupKFold, LeaveOneGroupOut
 from skopt.plots import plot_convergence
 
 from aktiRBD import utils
-from aktiRBD.classifier.models import model_factory, ModelSetup
+from aktiRBD.classifier.models import ModelFactory, ModelSetup
 from aktiRBD.classifier.tools.classification_threshold import get_night_and_patient_threshold
 from aktiRBD.classifier.tools.cv_iterator import cv_iterator
 from aktiRBD.classifier.tools.evaluator import Evaluator
@@ -46,6 +46,8 @@ class NestedCVBase(ABC):
         self.calibration = calibration
         self.early_stopping_options = early_stopping_options if early_stopping_options is not None \
             else [True, False] if config.model.which == 'xgboost' else [False]
+
+        self.use_fixed_features = bool(getattr(self.config.model.feature_selection, 'fixed_features', None))
 
     def __str__(self) -> str:
 
@@ -92,7 +94,7 @@ class NestedCVBase(ABC):
             repeats=self.n_repeats, outer_folds_expected=self.outer_splits,
             inner_folds=self.config.nested_cv.inner_cv.n_splits, seeds=seeds_dict, dataset_summary=ds_summary)
 
-        with utils.custom_tqdm(total=self.n_repeats) as pbar, self._manifest_guard(**_manifest_kwargs) as manifest:
+        with (utils.custom_tqdm(total=self.n_repeats) as pbar, self._manifest_guard(**_manifest_kwargs) as manifest):
             pbar.set_description(f"[PROGRESS]: {self.__class__.__name__}")
             _process_kwargs = self.config.data.processing.dict()
             _process_kwargs.update({'smote_seed': self.random_state})
@@ -103,10 +105,20 @@ class NestedCVBase(ABC):
             for repeat in range(self.n_repeats):
                 outer_seed = self.random_state + repeat
                 outer_cv = self._get_outer_splitter(outer_seed)
+
+                _fixed_rank_seed = getattr(self.config.nested_cv, "ranking_seed", None)
+                if _fixed_rank_seed is not None:
+                    logger.warning(
+                        f"Overriding ranking seed with fixed value {_fixed_rank_seed} "
+                        f"(ignoring outer_seed={outer_seed}).")
+                rank_seed = outer_seed if _fixed_rank_seed is None else int(_fixed_rank_seed)
+
                 _rankings_root_dir = self.config.nested_cv.load_path_cv_feature_rankings.joinpath(
-                    f"seed_{outer_seed}_{sys.platform}")
+                    f"seed_{rank_seed}_{sys.platform}")
                 manifest.setdefault("rankings_root_dirs", {})[f"seed{outer_seed}"] = str(_rankings_root_dir)
-                _rank_kwargs = {'root_dir': _rankings_root_dir, 'data_config': self.config.data, 'n_jobs': self.n_jobs}
+                _rank_kwargs = \
+                    {'root_dir': _rankings_root_dir, 'data_config': self.config.data, 'n_jobs': self.n_jobs} \
+                        if not self.use_fixed_features else None
                 save_path_repeat = utils.check_make_dir(self.save_path.joinpath(
                     f"repeats/repeat{repeat}_seed{outer_seed}"), True)
 
@@ -152,32 +164,53 @@ class NestedCVBase(ABC):
             default_model = model_setup.model().set_params(**model_setup.default_params)
             _default_scores = self._fit_and_eval_model(default_model, train_outer, valid_outer)
             logger.info(f"default model outer fold {k_outer}: {utils.fmt_dict(_default_scores['valid'])}")
-            utils.dump_to_json(_default_scores, save_path_fold.joinpath(f"default_model_scores.json"))
+            utils.dump_to_json(_default_scores, save_path_fold.joinpath(f'default_model_scores.json'))
             del _default_scores
 
             # perform BayesOpt using Inner-CV:
             fit_params = self.config.model.bayes_params.dict().copy()
-            fit_params.update({'cv_params': {
-                'group': train_outer.group, 'n_folds': self.config.nested_cv.inner_cv.n_splits,
-                'shuffle': self.config.nested_cv.inner_cv.shuffle, 'verbose': False},
-                'n_jobs': 1 if self.n_jobs != 1 else -1})
-            opt_params, best_score = self._perform_inner_cv_bayes_opt(
-                outer_fold=train_outer, model_setup=model_setup, rank_map=train_outer.feat_rank,
-                save_path=save_path_fold, fit_params=fit_params, inner_cv_seed=inner_seed,
-                stratify_by_dataset=self.config.nested_cv.stratify_by_dataset_if_pooled)
+            if self.use_fixed_features:
+                model_setup.bayesian_param_space = \
+                    [p for p in model_setup.bayesian_param_space if p.name != "top_k_feats"]
+                logger.warning("Subsetting training data to fixed features before BayesOpt.")
+                train_for_bayes = train_outer.select_features(
+                    self.config.model.feature_selection.fixed_features)
+            else:
+                train_for_bayes = train_outer
+
+            if not model_setup.bayesian_param_space:
+                logger.warning("No tunable hyperparameters (fixed features). Skipping BayesOpt.")
+                opt_params, best_score = {}, None
+            else:
+                fit_params.update({'cv_params': {
+                    'group': train_outer.group, 'n_folds': self.config.nested_cv.inner_cv.n_splits,
+                    'shuffle': self.config.nested_cv.inner_cv.shuffle, 'verbose': False},
+                    'n_jobs': 1 if self.n_jobs != 1 else -1})
+
+                opt_params, best_score = self._perform_inner_cv_bayes_opt(
+                    outer_fold=train_for_bayes, model_setup=model_setup, rank_map=train_outer.feat_rank,
+                    save_path=save_path_fold, fit_params=fit_params, inner_cv_seed=inner_seed,
+                    stratify_by_dataset=self.config.nested_cv.stratify_by_dataset_if_pooled)
 
             best_params = model_setup.bayesian_fixed_params.copy()
-            best_params.update(opt_params)
-            _top_k = best_params.pop('top_k_feats')
+            best_params.update(opt_params)  # opt_params is empty if bayes skipped, so will fallback to library defaults
 
-            _top_k_feat_names = {
-                name: val['rank'] for name, val in train_outer.feat_rank.items() if val['rank'] <= _top_k}
-            _top_k_feat_names = dict(sorted(_top_k_feat_names.items(), key=lambda item: item[1]))
-            utils.dump_to_json(_top_k_feat_names, save_path_fold.joinpath(f"top_k_feat_names.json"))
+            if not self.use_fixed_features:  # regular case, feature selection with ranking and top_k tuned
+                _top_k = best_params.pop('top_k_feats')
+                _top_k_feat_names = {
+                    name: val['rank'] for name, val in train_outer.feat_rank.items() if val['rank'] <= _top_k}
+                _top_k_feat_names = dict(sorted(_top_k_feat_names.items(), key=lambda item: item[1]))
+                utils.dump_to_json(_top_k_feat_names, save_path_fold.joinpath(f'top_k_feat_names.json'))
+                selected_feats = list(_top_k_feat_names.keys())
+            else:
+                logger.warning(
+                    f"Using fixed feature set with {len(self.config.model.feature_selection.fixed_features)} features.")
+                selected_feats = self.config.model.feature_selection.fixed_features
+                utils.dump_to_json(selected_feats, save_path_fold.joinpath('fixed_feat_names.json'))
 
             # choose only selected features
-            train_outer_top_k = train_outer.select_features(list(_top_k_feat_names.keys()))
-            valid_outer_top_k = valid_outer.select_features(list(_top_k_feat_names.keys()))
+            train_outer_top_k = train_outer.select_features(selected_feats)
+            valid_outer_top_k = valid_outer.select_features(selected_feats)
 
             # fit and eval optimized model:
             for early_stopping in self.early_stopping_options:
@@ -285,9 +318,10 @@ class NestedCVBase(ABC):
     def _initialize_model(model_cfg: ModelConfig, fold: Fold, random_state: int):
         _n_hc_train_outer, _n_rbd_train_outer = np.unique(fold.y, return_counts=True)[1]
         _cls_balance_outer = _n_hc_train_outer / _n_rbd_train_outer
-        return model_factory(
-            model_cfg.which, cls_balance=_cls_balance_outer,
-            seed=random_state, top_k_cfg=model_cfg.feature_selection.top_k_feats)
+        model_factory = ModelFactory(
+            model_cfg.which, cls_balance=_cls_balance_outer, seed=random_state,
+            top_k_cfg=model_cfg.feature_selection.top_k_feats, overrides=model_cfg.hp_overrides)
+        return model_factory.build()
 
     @staticmethod
     def _fit_and_eval_model(model, fold_train: Fold, fold_valid: Fold, threshold: float = .5):
@@ -327,7 +361,7 @@ class NestedCVBase(ABC):
         if isinstance(self, LODONestedCV):
             lodo_label_map = DatasetConfig.from_yaml()
             ds_labels = [self.fold_2_dataset.get(
-                f"seed{self.random_state}_fold{_fold.replace('outer_fold_', '')}","UNKNOWN")
+                f"seed{self.random_state}_fold{_fold.replace('outer_fold_', '')}", "UNKNOWN")
                 for _fold in from_fold]
             lodo_labels = [lodo_label_map.resolve(lbl) for lbl in ds_labels]
         else:
@@ -363,21 +397,47 @@ class NestedCVBase(ABC):
     @staticmethod
     def _make_hp_summary(fold_dirs: list[Path]):
         opt_params, top_k_feats = pd.DataFrame(), pd.DataFrame()
+        fixed_feats_cache = None  # read once and reuse across folds
 
         for k, _fold_dir in enumerate(fold_dirs):
-            _opt_params = utils.read_from_json(_fold_dir.joinpath('bay_opt/best_params.json'))['best_params']
+            # best params
+            _best_path = _fold_dir.joinpath('bay_opt/best_params.json')
+            if _best_path.exists():
+                _opt_params = utils.read_from_json(_best_path)['best_params']
+            else:
+                _opt_params = {}  # handle edge case: skipped BayesOpt
             opt_params = pd.concat([opt_params, pd.DataFrame([_opt_params]).T], axis=1)
-            _top_k_feats = utils.read_from_json(_fold_dir.joinpath('top_k_feat_names.json'))
-            top_k_feats = pd.concat([top_k_feats, pd.DataFrame(index=_top_k_feats.keys(),
-                                                               data={f'fold_{k + 1}': 1})], axis=1, sort=False)
 
-        top_k_feats['sum'] = top_k_feats.sum(axis=1)
-        top_k_feats = top_k_feats.sort_values(by='sum', ascending=False).fillna(0)
+            # feature list per fold
+            topk_path = _fold_dir.joinpath('top_k_feat_names.json')
+            fixed_path = _fold_dir.joinpath('fixed_feat_names.json')
+            if topk_path.exists():  # standard case: dict {feat: rank}
+                _top_k_dict = utils.read_from_json(topk_path)
+                feats = list(_top_k_dict.keys())
+            elif fixed_path.exists():  # fixed-feature case: list of feats; read once
+                if fixed_feats_cache is None:
+                    fixed_feats_cache = utils.read_from_json(fixed_path)
+                feats = fixed_feats_cache
+            else:
+                feats = []
+
+            if feats:
+                top_k_feats = pd.concat([top_k_feats, pd.DataFrame(index=feats, data={f'fold_{k + 1}': 1})],
+                                        axis=1, sort=False)
+
+        #  finalize summaries
+        if not top_k_feats.empty:
+            # only sum across fold_* cols
+            fold_cols = [c for c in top_k_feats.columns if c.startswith('fold_')]
+            top_k_feats['sum'] = top_k_feats[fold_cols].fillna(0).sum(axis=1)
+            top_k_feats = top_k_feats.sort_values(by='sum', ascending=False).fillna(0)
 
         opt_params.columns = [f'fold_{i + 1}' for i in range(len(fold_dirs))]
-        opt_params['mean'] = opt_params.mean(axis=1)
-        opt_params['std'] = opt_params.std(axis=1)
-        opt_params = opt_params.round(2)
+        if not opt_params.empty:
+            opt_params['mean'] = opt_params.mean(axis=1, numeric_only=True)
+            opt_params['std'] = opt_params.std(axis=1, numeric_only=True)
+            opt_params = opt_params.round(2)
+
         return opt_params, top_k_feats
 
     @staticmethod
@@ -640,23 +700,31 @@ class LODONestedCV(NestedCVBase):
         return data.dataset
 
     def _summarize_lodo_performance(self, scores: dict, from_fold: list[str], output_dir: Path):
-        """Reorganize performance metrics by metric across datasets."""
+        """Summarize LODO patient-level metrics for every available into JSON files under ./summaries/."""
         assert isinstance(self, LODONestedCV), "This function is only valid for LODO evaluation."
         assert hasattr(self, 'fold_2_dataset'), "fold_2_dataset mapping not found."
 
-        metrics_df = scores['opt_patient']['no_early_stopping']
-        metric_summary = {}
+        summaries_dir = (output_dir / "summaries").resolve()
+        summaries_dir.mkdir(parents=True, exist_ok=True)
 
-        for fold_name, row in zip(from_fold, metrics_df.itertuples(index=False)):
-            fold_idx = fold_name.replace("outer_fold_", "")
-            dataset_id = self.fold_2_dataset.get(f"seed{self.random_state}_fold{fold_idx}", "UNKNOWN")
+        # Iterate over all patient-level result variants present in `scores`
+        for variant_key, metrics_df in scores.get('opt_patient', {}).items():
+            if metrics_df is None or metrics_df.empty:
+                continue
 
-            for metric, value in zip(metrics_df.columns, row):
-                metric_summary.setdefault(metric, {})[dataset_id] = value
+            metric_summary = {}
 
-        output_path = output_dir / "lodo_eval_summary.json"
-        with open(output_path, "w") as f:
-            json.dump(metric_summary, f, indent=2)
+            # Map each fold's row to the held-out dataset using the manifest mapping
+            for fold_name, row in zip(from_fold, metrics_df.itertuples(index=False)):
+                fold_idx = fold_name.replace("outer_fold_", "")
+                dataset_id = self.fold_2_dataset.get(f"seed{self.random_state}_fold{fold_idx}", "UNKNOWN")
+
+                for metric, value in zip(metrics_df.columns, row):
+                    metric_summary.setdefault(metric, {})[dataset_id] = value
+
+            out_path = summaries_dir / f"lodo_eval_summary_{variant_key}.json"
+            with open(out_path, "w") as f:
+                json.dump(metric_summary, f, indent=2)
 
 
 if __name__ == '__main__':
@@ -675,9 +743,8 @@ if __name__ == '__main__':
     # _cv_run = Path(
     #         '/Users/david/Desktop/py_projects/aktiRBD_private/results/pipeline/run_trainPooled_2025-07-09_15h03m44s')
     _cv_run = Path(
-                 '/Users/david/Desktop/py_projects/aktiRBD_private/results/pipeline/run_trainPooled_2025-07-15_14h53m55s')
+        '/Users/david/Desktop/py_projects/aktiRBD_private/results/pipeline/run_trainPooled_2025-07-15_14h53m55s')
 
     cv = LODONestedCV(config=_config, save_path=_cv_run)
     # cv = KFoldNestedCV(config=_config, save_path=_cv_run)
     cv.eval()
-

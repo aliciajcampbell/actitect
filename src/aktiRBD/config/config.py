@@ -1,7 +1,7 @@
-from pathlib import Path
-from dataclasses import dataclass, fields, asdict
 import re
-from typing import Type, TypeVar, Any, Dict, List, Union
+from dataclasses import dataclass, fields, asdict
+from pathlib import Path
+from typing import Type, TypeVar, Any, Dict, List, Optional, get_origin, get_args, Union
 
 import yaml
 
@@ -20,7 +20,7 @@ class BaseConfig:
         init_kwargs = {}
         for field_ in fields(cls):
             field_name = field_.name
-            field_type = field_.type
+            field_type = cls._unwrap_optional(field_.type)
             if field_name not in data:
                 raise KeyError(f"Missing key '{field_name}' in configuration.")
             value = data[field_name]
@@ -50,6 +50,16 @@ class BaseConfig:
         with yaml_path.open('r') as file:
             config_dict = yaml.safe_load(file)
         return cls.from_dict(config_dict)
+
+    @staticmethod
+    def _unwrap_optional(tp):
+        """If type is Optional[T], return T, else return type unchanged."""
+        origin = get_origin(tp)
+        if origin is Union:
+            args = [a for a in get_args(tp) if a is not type(None)]
+            if len(args) == 1:
+                return args[0]
+        return tp
 
     def dict(self) -> dict:
         return asdict(self)
@@ -82,6 +92,7 @@ class TopKFeatsConfig(BaseConfig):
 @dataclass
 class FeatureSelectionConfig(BaseConfig):
     top_k_feats: TopKFeatsConfig
+    fixed_features: Optional[List[str]] = None
 
 
 @dataclass
@@ -90,7 +101,8 @@ class ModelConfig(BaseConfig):
     dummy: str
     early_stopping: EarlyStoppingConfig
     bayes_params: BayesParamsConfig
-    feature_selection: FeatureSelectionConfig
+    feature_selection: Optional[FeatureSelectionConfig]
+    hp_overrides: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -146,6 +158,7 @@ class NestedCVConfig(BaseConfig):
     stratify_by_dataset_if_pooled: bool
     min_patient_nights_eval: int
     load_path_cv_feature_rankings: Union[str, Path] = None
+    ranking_seed: int = None  # defaults to global random state
 
 
 @dataclass

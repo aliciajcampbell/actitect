@@ -143,7 +143,7 @@ class BayesianOptCV:
         self.seed = seed
         self.cv_score_weights = {'accuracy': .2, 'balanced_accuracy': .2, 'precision': .2, 'recall': .2, 'f1': .2}
 
-        self.feature_map = feat_rank_map
+        self.feature_map = feat_rank_map or {}
         self._assert_all_param_names_valid(exclude=['top_k_feats'])
 
     def _assert_all_param_names_valid(self, exclude):
@@ -174,10 +174,15 @@ class BayesianOptCV:
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=LineSearchWarning)
                 param_dict = {dim.name: param for dim, param in zip(self.param_space, params)}
-                top_k = param_dict.pop('top_k_feats')
-                _top_k_feat_idcs = [val['idx'] for val in self.feature_map.values() if val['rank'] <= top_k]
-                x_top_k = x[:, _top_k_feat_idcs]
-                return self._objective(x_top_k, y, y_strat, self.model, param_dict, self.fixed_params, cv_params,
+                if 'top_k_feats' in param_dict:
+                    top_k = param_dict.pop('top_k_feats')
+                    if not self.feature_map:
+                        raise ValueError("top_k_feats in param space but no feature_map was provided")
+                    _top_k_feat_idcs = [val['idx'] for val in self.feature_map.values() if val['rank'] <= top_k]
+                    x_sel_feats = x[:, _top_k_feat_idcs]
+                else: # no ranking used, just keep all features
+                    x_sel_feats = x
+                return self._objective(x_sel_feats, y, y_strat, self.model, param_dict, self.fixed_params, cv_params,
                                        self.cv_score_weights, use_early_stopping, _seed=self.seed, _n_jobs=n_jobs)
 
         optimizer_kwargs = {
