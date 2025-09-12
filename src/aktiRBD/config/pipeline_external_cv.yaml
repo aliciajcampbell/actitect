@@ -14,8 +14,20 @@ model:
     top_k_feats:
       tune: true           # true  → include in BayesOpt space
       low: 5 # 15 # 5
-      high: 70 # 35. # 70
+      high: 70 # 35 # 35 # 35. # 70
       fixed_value: 30      # used only if tune == false
+
+    # optional override: bypass top_k_feats selection and use fixed list instead
+    fixed_features:
+      # ≥ 5/5
+      # ['min_peak_prom_iqr', 'asd_4_10th_percentile', 'q25_mag_mean', 'rms_mag_10th_percentile', 'asd_1_skew', 'mean_mag_10th_percentile', 'q25_mag_10th_percentile', 'q25_x_90th_percentile', 'q75_mag_10th_percentile', 'q75_y_10th_percentile', 'med_mag_10th_percentile', 'q25_y_90th_percentile']
+      # ≥ 4/5
+      # ['asd_1_skew', 'asd_2_10th_percentile', 'asd_4_10th_percentile', 'avg_peak_prom_mean', 'avg_sp_power_10th_percentile', 'max_mag_10th_percentile', 'max_mag_mean', 'max_peak_prom_mean', 'max_y_iqr', 'max_y_mean', 'max_z_mean', 'mean_mag_10th_percentile', 'med_mag_10th_percentile', 'med_mag_mean', 'min_peak_prom_iqr', 'p3_10th_percentile', 'peaks_per_sec_skew', 'q25_mag_10th_percentile', 'q25_mag_mean', 'q25_x_90th_percentile', 'q25_y_90th_percentile', 'q25_y_mean', 'q25_z_90th_percentile', 'q75_mag_10th_percentile', 'q75_x_10th_percentile', 'q75_y_10th_percentile', 'q75_y_mean', 'rms_mag_10th_percentile', 'sp_entropy_mad', 'sp_entropy_std', 'std_y_10th_percentile', 'std_y_mean']
+      # ≥ 3/5
+      # ['asd_16_10th_percentile', 'asd_1_skew', 'asd_2_10th_percentile', 'asd_4_10th_percentile', 'avg_peak_prom_mean', 'avg_sp_power_10th_percentile', 'loc_first_min_mag_90th_percentile', 'max_mag_10th_percentile', 'max_mag_mean', 'max_peak_prom_mean', 'max_x_mean', 'max_y_iqr', 'max_y_mean', 'max_z_mean', 'mean_mag_10th_percentile', 'mean_mag_mean', 'med_mag_10th_percentile', 'med_mag_mean', 'min_peak_prom_iqr', 'min_peak_prom_mad', 'min_y_90th_percentile', 'min_y_mean', 'min_z_mean', 'p1_10th_percentile', 'p1_skew', 'p3_10th_percentile', 'peaks_per_sec_skew', 'power_10th_percentile', 'q25_mag_10th_percentile', 'q25_mag_mean', 'q25_x_90th_percentile', 'q25_x_mean', 'q25_y_90th_percentile', 'q25_y_mean', 'q25_z_90th_percentile', 'q75_mag_10th_percentile', 'q75_x_10th_percentile', 'q75_y_10th_percentile', 'q75_y_mean', 'rms_mag_10th_percentile', 'sd2_10th_percentile', 'sma_mag_iqr', 'sma_mag_mean', 'sp_entropy_mad', 'sp_entropy_std', 'std_mag_10th_percentile', 'std_y_10th_percentile', 'std_y_mean', 'std_z_mean']
+
+  hp_overrides:
+
 
 data:
   agg_level: 'night'
@@ -25,7 +37,7 @@ data:
     use_smote: True
 
   loader:
-    binary_mapping: {'HC': 0, 'RBD': 1}
+    binary_mapping: {'HC': 0, 'PD-RBD': 0,  'iRBD': 1, 'PD+RBD': 1}
     feature_dir: './features/per_night'  # relative to patient_dir
     aggregation: [ 'mean', 'std', 'skew', 'kurt', 'mad', 'iqr', '10th_percentile', '90th_percentile' ]
     included_local_features: [
@@ -82,12 +94,14 @@ nested_cv:
   n_jobs: -1
   stratify_by_dataset_if_pooled: True
   min_patient_nights_eval: 4
+  ranking_seed: # defaults to global random_state
   outer_cv:
     n_splits: 5
     shuffle: True
   inner_cv:
     n_splits: 5
     shuffle: True
+
 
   n_interp_points_roc_pr:  100
   n_interp_points_calibration: 11
@@ -96,8 +110,8 @@ nested_cv:
     name: 'nested_cv'
     hp_setup_name:
     early_stopping:
-    calibration:  'sigmoid' # 'sigmoid'
-    threshold: 'default'  # 'roc_dist'
+    calibration:  'sigmoid' # 'sigmoid' # 'sigmoid'
+    threshold:  'default'  # threshold options: default, roc_dist, pr_dist, pr_f1, macro_ba, macro_ba_weighted, roc_dist_per_dataset_mean, roc_dist_per_dataset_median, pr_dist_per_dataset_mean, pr_dist_per_dataset_median, pr_f1_per_dataset_mean, pr_f1_per_dataset_median, fixed:<float>
     patient_aggregation: 'ensemble_major'
 
   log_night_eval: false
