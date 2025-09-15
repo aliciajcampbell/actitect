@@ -118,6 +118,7 @@ nested_cv:
   stratify_by_dataset_if_pooled: True
   min_patient_nights_eval: 4
   ranking_seed: # defaults to global random_state
+  extra_diagnostic_metrics: True
   outer_cv:
     n_splits: 5
     shuffle: True

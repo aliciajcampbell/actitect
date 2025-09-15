@@ -700,7 +700,10 @@ class LODONestedCV(NestedCVBase):
         return data.dataset
 
     def _summarize_lodo_performance(self, scores: dict, from_fold: list[str], output_dir: Path):
-        """Summarize LODO patient-level metrics for every available into JSON files under ./summaries/."""
+        """Summarize LODO patient-level metrics into JSON under ./summaries/.
+        Also inlines (if available) the per-fold patient diagnostics as:
+          { ..., "diagnostic_metrics": { <DATASET>: { ...diag... }, ... } }.
+        """
         assert isinstance(self, LODONestedCV), "This function is only valid for LODO evaluation."
         assert hasattr(self, 'fold_2_dataset'), "fold_2_dataset mapping not found."
 
@@ -713,14 +716,33 @@ class LODONestedCV(NestedCVBase):
                 continue
 
             metric_summary = {}
+            diag_summary = {}  # will be merged under "diagnostic_metrics"
 
             # Map each fold's row to the held-out dataset using the manifest mapping
             for fold_name, row in zip(from_fold, metrics_df.itertuples(index=False)):
                 fold_idx = fold_name.replace("outer_fold_", "")
                 dataset_id = self.fold_2_dataset.get(f"seed{self.random_state}_fold{fold_idx}", "UNKNOWN")
 
+                # 1) regular metrics
                 for metric, value in zip(metrics_df.columns, row):
                     metric_summary.setdefault(metric, {})[dataset_id] = value
+
+                # 2) try to inline diagnostics for this fold+variant (if present)
+                #    expected path: repeats/**/<fold_name>/<variant_key>/patient_prob_diagnostic.json
+                diag_file = None
+                for p in output_dir.rglob(f"repeats/**/{fold_name}/{variant_key}/patient_prob_diagnostic.json"):
+                    diag_file = p
+                    break
+                if diag_file and diag_file.exists():
+                    try:
+                        diag = utils.read_from_json(diag_file)
+                        diag_summary[dataset_id] = diag
+                    except Exception as e:
+                        logger.warning(f"Could not read diagnostic metrics from {diag_file}: {e}")
+
+            # merge diagnostics inside the same JSON:
+            if diag_summary:
+                metric_summary["diagnostic_metrics"] = diag_summary
 
             out_path = summaries_dir / f"lodo_eval_summary_{variant_key}.json"
             with open(out_path, "w") as f:
@@ -732,7 +754,7 @@ if __name__ == '__main__':
 
     # Load config
     _config = PipelineConfig.from_yaml(
-        Path('/Users/david/Desktop/py_projects/aktiRBD_private/aktiRBD/src/aktiRBD/config/pipeline.yaml'))
+        Path('/Users/david/Desktop/py_projects/aktiRBD_private/aktiRBD/src/aktiRBD/config/pipeline_external_cv.yaml'))
 
     # _cv_run = Path(
     #     '/Users/david/Desktop/py_projects/aktiRBD_private/results/pipeline/run_trainPooled_2025-07-04_17h29m40s')
@@ -743,7 +765,7 @@ if __name__ == '__main__':
     # _cv_run = Path(
     #         '/Users/david/Desktop/py_projects/aktiRBD_private/results/pipeline/run_trainPooled_2025-07-09_15h03m44s')
     _cv_run = Path(
-        '/Users/david/Desktop/py_projects/aktiRBD_private/results/pipeline/run_trainPooled_2025-07-15_14h53m55s')
+        '/Users/david/Desktop/py_projects/aktiRBD_private/results/pipeline/run_trainPooled_2025-09-15_15h36m11s')
 
     cv = LODONestedCV(config=_config, save_path=_cv_run)
     # cv = KFoldNestedCV(config=_config, save_path=_cv_run)
