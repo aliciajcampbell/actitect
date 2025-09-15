@@ -48,7 +48,10 @@ class PooledTrainPipeline(BasePipeline):
             self._run_nested_cv(_cv, train)
 
         # produce final model(s) for testing
-        self._run_pretrain(train)
+        if not self.temp_config.final_model.skip_pretrain:
+            self._run_pretrain(train)
+        else:
+            logger.warning("skipping pretraining of final model, set 'config.final_model.skip_pretrain=True'.")
 
         # update and dump config changes
         self._reconcile_and_update_config(

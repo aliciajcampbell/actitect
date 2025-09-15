@@ -27,10 +27,12 @@ class TrainPipeline(BasePipeline):
         self._run_nested_cv(train)
 
         # produce final model(s) for testing
-        self._run_pretrain(train, test)  # 'test' only needed to create combined training set (for external test only)
-
-        # load pretrained models and use for evaluation
-        self._run_eval(test)
+        if not self.config.final_model.skip_pretrain:
+            self._run_pretrain(train, test)  # 'test' only needed to create combined cgn training set (ext. test only)
+            # load pretrained models and use for evaluation
+            self._run_eval(test)
+        else:
+            logger.warning("skipping pretraining of final model, set 'config.final_model.skip_pretrain=True'.")
 
     def _run_nested_cv(self, train: FeatureSet):
         _save_path_cv = utils.check_make_dir(self.save_path.joinpath('nested_cv'), True)

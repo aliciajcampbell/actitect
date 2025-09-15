@@ -38,6 +38,29 @@ data:
 
   loader:
     binary_mapping: {'HC': 0, 'PD-RBD': 0,  'iRBD': 1, 'PD+RBD': 1}
+    rebalance_datasets: # for LODO only, to mitigate dataset biases
+        method: 'cap_to_second_largest'
+        # none: keep original | cap_to_second_largest: cut largest to 2nd largest if ≥ ratio |
+        # min: cut all to smallest | equalize_to_median: cut all to median | cap_to_k: cap each at k |
+        # proportional_to_quota: downsample to quotas | weights_only: keep all, use weights
+        apply_to: 'train'                 # split to affect (train|test); usually "train"
+        random_state: 42
+        preserve_class_ratio: true        # keep within-dataset RBD/HC mix when downsampling
+
+        # cap_to_second_largest
+        dominance_ratio: 1.2             # only cap if largest ≥ ratio × second largest
+
+        # cap_to_k
+        k_per_dataset: 100                # hard cap K per dataset (ignored if method != cap_to_k)
+
+        # proportional_to_quota
+        quotas: # share per dataset (must sum to 1.0); downsample only
+          AAR: 0.25
+          CGNtrain: 0.25
+          CGNtest: 0.25
+          OXF: 0.25
+
+
     feature_dir: './features/per_night'  # relative to patient_dir
     aggregation: [ 'mean', 'std', 'skew', 'kurt', 'mad', 'iqr', '10th_percentile', '90th_percentile' ]
     included_local_features: [
@@ -110,7 +133,7 @@ nested_cv:
     name: 'nested_cv'
     hp_setup_name:
     early_stopping:
-    calibration:  'sigmoid' # 'sigmoid' # 'sigmoid'
+    calibration:  'sigmoid' # 'sigmoid'
     threshold:  'default'  # threshold options: default, roc_dist, pr_dist, pr_f1, macro_ba, macro_ba_weighted, roc_dist_per_dataset_mean, roc_dist_per_dataset_median, pr_dist_per_dataset_mean, pr_dist_per_dataset_median, pr_f1_per_dataset_mean, pr_f1_per_dataset_median, fixed:<float>
     patient_aggregation: 'ensemble_major'
 
@@ -120,6 +143,7 @@ nested_cv:
 
 
 final_model:
+    skip_pretrain: True
     n_jobs: -1
     bayes_cv:
       n_splits: 5

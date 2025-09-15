@@ -10,6 +10,7 @@ from sklearn.utils.class_weight import compute_class_weight
 
 from aktiRBD import utils
 from aktiRBD.classifier.tools.feature_set import FeatureSet
+from aktiRBD.config import RebalanceDatasetsConfig
 
 __all__ = ['DataLoader']
 
@@ -23,7 +24,8 @@ class DataLoader:
     def __init__(self, data_dir: Union[Path, List[Path]], meta_path: Union[Path, pd.DataFrame],
                  feature_dir: Path, aggregation: List[str],
                  included_local_features: List[str], included_global_features: List[str],
-                 binary_mapping: dict, add_str_labels: bool = False, verbose: bool = True, shuffle: bool = True):
+                 binary_mapping: dict, add_str_labels: bool = False, verbose: bool = True, shuffle: bool = True,
+                 rebalance_datasets: RebalanceDatasetsConfig = None):
 
         self.dataset_is_pooled = isinstance(data_dir, list) and len(data_dir) > 1
         self.data_dirs = data_dir if isinstance(data_dir, list) else [data_dir]
@@ -44,6 +46,9 @@ class DataLoader:
         self.included_global_features = included_global_features
         self.verbose = verbose
         self.add_str_labels = add_str_labels
+        if isinstance(rebalance_datasets, dict):
+            rebalance_datasets = RebalanceDatasetsConfig.from_dict(rebalance_datasets)
+        self.rebalance_datasets = rebalance_datasets
 
         self.meta_df, self.records_train, self.records_test = self._get_meta(meta_path)
 
@@ -86,8 +91,15 @@ class DataLoader:
             x = _feature_df.to_numpy()
             y = local_feat_df.ground_truth
             y_str = local_feat_df.diagnosis if self.add_str_labels else None
-            test_index_mask = local_feat_df.record_key.isin(self.records_train)
-            train_index_mask = local_feat_df.record_key.isin(self.records_test)
+            train_index_mask = local_feat_df.record_key.isin(self.records_train)
+            test_index_mask = local_feat_df.record_key.isin(self.records_test)
+
+            if self.dataset_is_pooled and getattr(self, 'rebalance_datasets', None) \
+                    and getattr(self.rebalance_datasets, 'method', None) not in (None, 'none'):
+                logger.warning(
+                    "[Rebalance] requested (method=%s) but only implemented for agg_level='night'. Skipping.",
+                    self.rebalance_datasets.method
+                )
 
         else:
 
@@ -107,6 +119,16 @@ class DataLoader:
                 self.train_id_map = feat_df_night[train_index_mask].id.to_numpy()
                 self.test_id_map = feat_df_night[test_index_mask].id.to_numpy()
 
+                # Apply dataset rebalancing (pooled only)
+                if self.dataset_is_pooled and getattr(self, 'rebalance_datasets', None) \
+                        and getattr(self.rebalance_datasets, 'method', None) not in (None, 'none'):
+                    logger.warning(
+                        f" applying composite dataset resampling with 'method='{self.rebalance_datasets.method}'")
+                    train_index_mask = self._apply_dataset_rebalancing(feat_df_night, train_index_mask)
+                    # refresh train_id_map after rebalancing
+                    self.train_id_map = feat_df_night[train_index_mask].id.to_numpy()
+                    self._log_rebalanced_train_summary(feat_df_night, train_index_mask)
+
             elif agg_level == 'patient':
                 _included_local_features = [
                     f"{_feat}_{postfix}" for postfix in self.aggregation for _feat in self.included_local_features
@@ -124,10 +146,17 @@ class DataLoader:
                 feat_map = _feature_df.columns.values
                 x = _feature_df.to_numpy()
                 y = feat_df_patient.ground_truth
-                test_index_mask = feat_df_patient.record_key.isin(self.records_train)
-                train_index_mask = feat_df_patient.id.isin(self.records_test)
+                train_index_mask = feat_df_patient.record_key.isin(self.records_train)
+                test_index_mask = feat_df_patient.record_key.isin(self.records_test)
                 self.train_id_map = feat_df_patient[train_index_mask].id.to_numpy()
                 self.test_id_map = feat_df_patient[test_index_mask].id.to_numpy()
+
+                if self.dataset_is_pooled and getattr(self, 'rebalance_datasets', None) \
+                        and getattr(self.rebalance_datasets, 'method', None) not in (None, 'none'):
+                    logger.warning(
+                        "[Rebalance] requested (method=%s) but only implemented for agg_level='night'. Skipping.",
+                        self.rebalance_datasets.method
+                    )
 
         x_train = np.array(x[train_index_mask])
         y_train = np.array(y[train_index_mask])
@@ -239,7 +268,7 @@ class DataLoader:
 
         mapping_keys, data_keys = set(self.binary_mapping.keys()), set(meta_df['diagnosis'].unique())
         unused_keys = mapping_keys - data_keys
-        if unused_keys: # keys defined in mapping but not present in the data
+        if unused_keys:  # keys defined in mapping but not present in the data
             logger.warning(f"Mapping keys not present in this dataset: {unused_keys}")
         unmapped_keys = data_keys - mapping_keys
         if unmapped_keys:  # Keys present in the data but not covered by the mapping
@@ -581,3 +610,203 @@ class DataLoader:
                     if dup_col in global_feat_df.columns:
                         global_feat_df[col] = global_feat_df[col].fillna(global_feat_df.pop(dup_col))
         return global_feat_df
+
+    def _apply_dataset_rebalancing(
+            self, df_night: pd.DataFrame,  # aggregated night-level DF (has 'record_key','id','ground_truth',...)
+            train_index_mask: np.ndarray,  # boolean mask over df_night rows
+    ) -> np.ndarray:
+        """Rebalance the *training* portion by downsampling records per dataset.
+        Operates at record level and then keeps all nights from the chosen records.
+        Supported methods (self.rebalance_datasets.method):
+          - 'none' / None: do nothing
+          - 'min': equalize all datasets to the size of the smallest (strict downsample)
+          - 'median': cap each dataset at the median dataset size
+          - 'cap_absolute': cap each dataset at a fixed maximum (uses .max_per_dataset)
+          - 'cap_to_second_largest': cap the largest dataset to the size of the
+             second largest if it exceeds dominance_ratio × second_largest
+             (uses .dominance_ratio; default 1.4–1.5 is sensible)
+        If .preserve_class_ratio is True, per-dataset positive/negative sampling
+        follows the dataset’s original train-split class proportions."""
+        cfg = getattr(self, "rebalance_datasets", None)
+        if not cfg or not getattr(cfg, "method", None) or cfg.method in ("none", None):
+            return train_index_mask
+
+        assert self.dataset_is_pooled, \
+            "Rebalancing by dataset requires pooled mode with 'dataset_id' available."
+
+        # ---------------------------------------------
+        # Build a RECORD-LEVEL view of the *train* part
+        # ---------------------------------------------
+        train_df = df_night.loc[train_index_mask, ["record_key", "id", "ground_truth"]].copy()
+
+        # one row per record_key (record = subject or subject_record)
+        rec_df = (
+            train_df.groupby("record_key")
+            .agg(id=("id", "first"),
+                 y=("ground_truth", "first"))
+            .reset_index()
+        )
+
+        # map to dataset_id
+        rec_df["dataset_id"] = rec_df["id"].map(self.map_subject_to_dataset)
+        if rec_df["dataset_id"].isna().any():
+            missing = rec_df.loc[rec_df["dataset_id"].isna(), "id"].unique().tolist()
+            raise ValueError(f"Missing dataset_id mapping for IDs: {missing[:5]}{'...' if len(missing) > 5 else ''}")
+
+        rng = np.random.default_rng(getattr(cfg, "seed", 42))
+
+        # ---------------------------------------------
+        # Determine per-dataset target sizes
+        # ---------------------------------------------
+        sizes = rec_df.groupby("dataset_id").size().sort_values()
+        ds_order = list(sizes.index)
+        ds_sizes = sizes.to_dict()
+
+        method = cfg.method
+        target_sizes = {}
+
+        if method == "min":
+            target = int(sizes.min())
+            for ds in ds_order:
+                target_sizes[ds] = min(ds_sizes[ds], target)
+
+        elif method == "median":
+            target = int(np.median(sizes.values))
+            for ds in ds_order:
+                target_sizes[ds] = min(ds_sizes[ds], target)
+
+        elif method == "cap_absolute":
+            max_cap = int(getattr(cfg, "max_per_dataset", 0) or 0)
+            if max_cap <= 0:
+                raise ValueError("cap_absolute requires a positive 'max_per_dataset'.")
+            for ds in ds_order:
+                target_sizes[ds] = min(ds_sizes[ds], max_cap)
+
+        elif method == "cap_to_second_largest":
+            # cap ONLY the largest dataset if it's too dominant vs the 2nd largest
+            if len(sizes) < 2:
+                # nothing to do with a single dataset
+                return train_index_mask
+            second = int(sizes.iloc[-2])
+            largest_ds = sizes.index[-1]
+            largest_n = int(sizes.iloc[-1])
+            ratio = float(getattr(cfg, "dominance_ratio", 1.5))
+
+            for ds in ds_order:
+                if ds == largest_ds and largest_n > ratio * second:
+                    target_sizes[ds] = second
+                else:
+                    target_sizes[ds] = ds_sizes[ds]
+
+        else:
+            raise ValueError(f"Unknown rebalancing method: {method}")
+
+        # ---------------------------------------------
+        # Sample record_keys per dataset (optionally preserving class ratios)
+        # ---------------------------------------------
+        keep_record_keys = []
+
+        preserve_ratio = bool(getattr(cfg, "preserve_class_ratio", True))
+        for ds, target_n in target_sizes.items():
+            sub = rec_df[rec_df["dataset_id"] == ds]
+            if target_n >= len(sub):
+                keep_record_keys.extend(sub["record_key"].tolist())
+                continue
+
+            if not preserve_ratio:
+                sel = sub.sample(n=target_n, random_state=int(getattr(cfg, "seed", 42)))
+                keep_record_keys.extend(sel["record_key"].tolist())
+            else:
+                # preserve within-dataset class mix
+                pos = sub[sub["y"] == 1]
+                neg = sub[sub["y"] == 0]
+                n_pos = len(pos)
+                n_neg = len(neg)
+                if n_pos + n_neg == 0:
+                    continue
+
+                frac_pos = n_pos / (n_pos + n_neg)
+                n_pos_target = int(round(frac_pos * target_n))
+                n_neg_target = target_n - n_pos_target
+
+                pos_keep = pos.sample(
+                    n=min(n_pos_target, n_pos),
+                    random_state=int(getattr(cfg, "seed", 42))
+                )
+                neg_keep = neg.sample(
+                    n=min(n_neg_target, n_neg),
+                    random_state=int(getattr(cfg, "seed", 42) + 1)
+                )
+
+                # If rounding / scarcity left us short, top up from the larger class
+                short = target_n - (len(pos_keep) + len(neg_keep))
+                if short > 0:
+                    remainder = sub.drop(pos_keep.index.union(neg_keep.index), errors="ignore")
+                    if len(remainder) > 0:
+                        extra = remainder.sample(
+                            n=min(short, len(remainder)),
+                            random_state=int(getattr(cfg, "seed", 42) + 2)
+                        )
+                        take = pd.concat([pos_keep, neg_keep, extra], axis=0)
+                    else:
+                        take = pd.concat([pos_keep, neg_keep], axis=0)
+                else:
+                    take = pd.concat([pos_keep, neg_keep], axis=0)
+
+                keep_record_keys.extend(take["record_key"].tolist())
+
+        keep_record_keys = set(keep_record_keys)
+
+        # ----------------------------------------------------
+        # Convert the chosen records back to a row-wise mask
+        # ----------------------------------------------------
+        new_train_mask = train_index_mask.copy()
+        train_rows = np.where(train_index_mask)[0]
+        train_rec_keys = df_night.loc[train_index_mask, "record_key"].values
+        keep_mask_local = np.array([rk in keep_record_keys for rk in train_rec_keys], dtype=bool)
+        new_train_mask[train_rows] = keep_mask_local
+
+        # Logging summary
+        before = {ds: int(n) for ds, n in ds_sizes.items()}
+        after = {
+            ds: int((rec_df["dataset_id"].isin([ds]) & rec_df["record_key"].isin(keep_record_keys)).sum())
+            for ds in ds_order
+        }
+        logger.info(f"[Rebalance] method={method}  preserve_class_ratio={preserve_ratio}")
+        logger.info(f"[Rebalance] per-dataset counts (records): before={before}  →  after={after}")
+
+        return new_train_mask
+
+    def _log_rebalanced_train_summary(self, df_night: pd.DataFrame, train_index_mask: np.ndarray):
+        """Log an info summary comparable to _log_info_ but for the TRAIN split after rebalancing.
+           Works at record level (one row per record_key)."""
+        # One row per record (record_key), with id, y, dataset_id
+        rec_df = (
+            df_night.loc[train_index_mask, ['record_key', 'id', 'ground_truth']]
+            .drop_duplicates()
+            .assign(
+                dataset_id=lambda d: d['id'].map(self.map_subject_to_dataset) if self.dataset_is_pooled else 'SINGLE')
+        )
+
+        # Totals
+        total = len(rec_df)
+        n_rbd = int((rec_df['ground_truth'] == 1).sum())
+        n_hc = total - n_rbd
+        p_rbd = (n_rbd / total * 100) if total else 0.0
+        p_hc = (n_hc / total * 100) if total else 0.0
+
+        logger.info("[Rebalance][post] train split (records): n = %d", total)
+        logger.info("[Rebalance][post] \t - n_rbd = %d (%.1f%%)", n_rbd, p_rbd)
+        logger.info("[Rebalance][post] \t - n_hc  = %d (%.1f%%)", n_hc, p_hc)
+
+        if self.dataset_is_pooled:
+            logger.info("[Rebalance][post] Dataset-wise contributions (TRAIN):")
+            for ds in sorted(rec_df['dataset_id'].unique()):
+                sub = rec_df[rec_df['dataset_id'] == ds]
+                t = len(sub)
+                r = int((sub['ground_truth'] == 1).sum())
+                h = t - r
+                pr = (r / t * 100) if t else 0.0
+                ph = (h / t * 100) if t else 0.0
+                logger.info("\t - dataset %s (train): total = %3d, rbd = %3d, hc = %3d, rbd = %4.1f%%, hc = %4.1f%%",
+                            ds, t, r, h, pr, ph)

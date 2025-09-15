@@ -120,6 +120,7 @@ nested_cv:
 
 
 final_model:
+    skip_pretrain: True
     n_jobs: -1
     bayes_cv:
       n_splits: 5

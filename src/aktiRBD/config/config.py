@@ -7,7 +7,7 @@ import yaml
 
 __all__ = ['PipelineConfig', 'ModelConfig', 'DataConfig', 'NestedCVConfig',
            'FinalModelConfig', 'ExternalTestConfig', 'ExperimentConfig', 'LoaderConfig', 'DatasetConfig',
-           'TopKFeatsConfig', 'FeatureSelectionConfig']
+           'TopKFeatsConfig', 'FeatureSelectionConfig', 'RebalanceDatasetsConfig']
 
 
 @dataclass
@@ -113,12 +113,30 @@ class ProcessingConfig(BaseConfig):
 
 
 @dataclass
+class RebalanceDatasetsConfig(BaseConfig):
+    """Optional dataset rebalancing during training.
+    method:
+      none | cap_to_second_largest | min | equalize_to_median |
+      cap_to_k | proportional_to_quota | weights_only"""
+    method: str
+    apply_to: str
+    random_state: int
+    preserve_class_ratio: bool
+
+    # Optional parameters for specific methods
+    dominance_ratio: float = 1.4  # cap_to_second_largest gate
+    k_per_dataset: Optional[int] = None  # cap_to_k absolute cap
+    quotas: Optional[Dict[str, float]] = None  # proportional_to_quota quotas per dataset
+
+
+@dataclass
 class LoaderConfig(BaseConfig):
     binary_mapping: dict
     feature_dir: str  # relative to patient_dir
     aggregation: List[str]
     included_local_features: List[str]
     included_global_features: List[str]
+    rebalance_datasets: Optional[RebalanceDatasetsConfig] = None
 
 
 @dataclass
@@ -163,6 +181,7 @@ class NestedCVConfig(BaseConfig):
 
 @dataclass
 class FinalModelConfig(BaseConfig):
+    skip_pretrain: bool
     n_jobs: int
     bayes_cv: CVConfig
     bayes_params: BayesParamsConfig
