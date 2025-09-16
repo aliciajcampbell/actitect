@@ -213,39 +213,268 @@ class FeatureSet:
             raise KeyError(f"Feature {e} not found in feat_map.")
 
     def _apply_scaler(self, scaler_info: Optional[dict] = None):
-        """ Applies scaling to the FeatureSet using the specified or precomputed scaler parameters.
-        Parameters:
-            :param scaler_info: (Optional[Dict]): The parameters for the scaler. If None, uses
-            self.process_params['scaler'] (i.e. for fit_transform), else uses dict for .transform().
-        Updates:
-            self.x: Transformed features.
-            self.process_params['scaler']: Updated scaler parameters. """
+        """
+        Applies scaling to the FeatureSet using the specified or precomputed scaler parameters.
+
+        Strategy encoding (in scaler_info['name']):
+          - 'standard' | 'robust' | 'minmax'                 -> global (current behavior)
+          - 'standard:per-ds-macro'                          -> per-dataset fit + unweighted macro inference
+          - 'standard:per-ds-macro-w'                        -> per-dataset fit + size-weighted macro inference
+        (Works analogously for 'robust' and 'minmax'.)
+
+        Notes:
+          - Fit path (no 'fitted' flag): compute per-site params from *training* data only,
+            then compute a macro 'inference' scaler. No test-site stats are ever added.
+          - Transform path ('fitted' flag True): applies per-site scaler for known train sites,
+            else applies 'inference' scaler (held-out site).
+        """
         if scaler_info is None:  # .fit_transform() case
             scaler_info = self.process_params['scaler']
 
-        if scaler_info.get('name', '').lower() != 'none':
-            scaler_class = SCALER_MAPPING.get(scaler_info.get('name').lower())
-            if scaler_class is None:
-                raise ValueError(f"Scaler type '{scaler_info.get('name')}' is not supported. "
-                                 f"Choose from {list(SCALER_MAPPING.keys())} or 'none'.")
+        name_raw = (scaler_info.get('name') or '').lower()
+        if name_raw == '' or name_raw == 'none':
+            # no scaling requested
+            self.process_params['scaler'] = scaler_info
+            return
 
-            scaler = scaler_class()
-            if not scaler_info.get('fitted', False):  # scaler is not fitted
+        # Parse base scaler + strategy suffix
+        if ':' in name_raw:
+            base_name, strategy = name_raw.split(':', 1)
+        else:
+            base_name, strategy = name_raw, 'global'
+
+        scaler_class = SCALER_MAPPING.get(base_name)
+        if scaler_class is None:
+            raise ValueError(f"Scaler type '{base_name}' is not supported. "
+                             f"Choose from {list(SCALER_MAPPING.keys())} or 'none'.")
+
+        # Helpers
+        def __as_np(a):  # ensure numpy arrays
+            return np.asarray(a) if not isinstance(a, np.ndarray) else a
+
+        def __collect_fitted_attrs(scaler_obj):
+            """Collect all fitted attributes ending with '_' from a sklearn scaler."""
+            out = {}
+            for attr in dir(scaler_obj):
+                if attr.endswith("_"):
+                    val = getattr(scaler_obj, attr, None)
+                    if isinstance(val, (list, np.ndarray, float, int)):
+                        out[attr] = __as_np(val)
+            return out
+
+        def __compute_macro(per_site_dict, _weighted=False, eps=1e-8):
+            """
+            Compute macro-averaged inference scaler parameters from per-site stats.
+            Works for StandardScaler (mean_, scale_), RobustScaler (center_, scale_),
+            MinMaxScaler (min_, scale_), etc. We average *all* keys that end with '_'
+            and exist in the per-site dicts.
+            """
+            # Use first site to determine the keys to average
+            sample_site = next(iter(per_site_dict.values()))
+            feature_keys = [k for k in sample_site.keys() if k.endswith("_")]
+
+            weights = np.array([float(d.get('n', 1)) for d in per_site_dict.values()])
+            W = None
+            if _weighted and weights.sum() > 0:
+                W = (weights / weights.sum())[:, None]
+
+            inference = {'fitted': True, 'name': sample_site.get('name', base_name)}
+            for key in feature_keys:
+                arrays = np.stack([__as_np(d[key]) for d in per_site_dict.values()], axis=0)
+                if W is not None:
+                    val = (W * arrays).sum(axis=0)
+                else:
+                    val = arrays.mean(axis=0)
+                if key == "scale_":
+                    val = np.maximum(val, eps)  # avoid zero division
+                inference[key] = val
+            return inference
+
+        # === Fit path (training) ===
+        if not scaler_info.get('fitted', False):
+            # Global (backward-compatible): fit one scaler on all training samples
+            if strategy == 'global':
+                scaler = scaler_class()
                 self.x = scaler.fit_transform(self.x)
-                scaler_info['fitted'] = True
-                for attr in dir(scaler):  # dynamically store scaling parameters
-                    if not attr.startswith('_') and hasattr(scaler, attr):
-                        value = getattr(scaler, attr)
-                        if isinstance(value, (list, np.ndarray, float, int)):
-                            scaler_info[attr] = value
-                logger.info(f"fitted and applied {scaler_info.get('name')} scaler.")
+                # persist fitted attributes
+                fitted = {'name': base_name, 'strategy': 'global', 'fitted': True}
+                fitted.update({k: (v.tolist() if isinstance(v, np.ndarray) else v)
+                               for k, v in __collect_fitted_attrs(scaler).items()})
+                scaler_info.update(fitted)
+                logger.info(f"fitted and applied global {base_name} scaler.")
+                self.process_params['scaler'] = scaler_info
+                return
 
-            else:  # apply fitted scaler
-                for attr, value in scaler_info.items():  # set the scalers internal attributes to mimic a fitted state
-                    if attr.endswith("_"):  # indicating fitted params
-                        setattr(scaler, attr, np.array(value))
-                self.x = scaler.transform(self.x)
-                logger.info(f"applying pre-fitted {scaler_info.get('name')} scaler.")
+            # Per-dataset strategies require dataset labels
+            if self.dataset is None:
+                raise ValueError("Per-dataset scaling requested but 'dataset' field is None.")
+
+            ds = __as_np(self.dataset)
+            unique_sites = np.unique(ds)
+            per_site = {}
+            X = self.x  # (n_samples, n_features)
+
+            # Fit per-site scaler and transform in-place per site
+            for site in unique_sites:
+                mask = (ds == site)
+                site_scaler = scaler_class()
+                X_site = X[mask]
+                X[mask] = site_scaler.fit_transform(X_site)
+                # persist ALL fitted params dynamically (center_, mean_, scale_, min_, etc.)
+                site_dict = {'name': base_name, 'fitted': True, 'n': int(mask.sum())}
+                site_dict.update(__collect_fitted_attrs(site_scaler))
+                per_site[str(site)] = site_dict
+
+            self.x = X
+
+            # Compute macro inference params (un/weighted)
+            weighted = strategy.endswith('-w')
+            inference = __compute_macro(per_site, _weighted=weighted)
+
+            scaler_info.update({
+                'name': f"{base_name}:{strategy}",
+                'strategy': strategy,
+                'fitted': True,
+                'per_site': {
+                    k: {
+                        **{kk: (vv.tolist() if isinstance(vv, np.ndarray) else vv)
+                           for kk, vv in v.items() if kk.endswith('_')},
+                        'n': v['n'], 'name': v['name'], 'fitted': True
+                    }
+                    for k, v in per_site.items()
+                },
+                'inference': {
+                    **{kk: (vv.tolist() if isinstance(vv, np.ndarray) else vv)
+                       for kk, vv in inference.items() if kk.endswith('_')},
+                    'name': base_name, 'fitted': True
+                }
+            })
+            logger.info(f"fitted and applied {base_name} scaler with strategy='{strategy}'; "
+                        f"sites={list(per_site.keys())}; weighted={weighted}")
+            self.process_params['scaler'] = scaler_info
+            return
+
+        # === Transform path (inference / later stages) ===
+        # Rebuild scaler and apply either per-site or inference params without refitting
+        strategy = scaler_info.get('strategy', 'global')
+        base_name = scaler_info.get('name', base_name).split(':', 1)[0]  # ensure base name
+
+        if strategy == 'global':
+            scaler = scaler_class()
+            # load fitted attributes
+            for attr, value in scaler_info.items():
+                if attr.endswith("_"):
+                    setattr(scaler, attr, np.array(value))
+            self.x = scaler.transform(self.x)
+            logger.info(f"applying pre-fitted global {base_name} scaler.")
+            self.process_params['scaler'] = scaler_info
+            return
+
+        # Per-dataset transform: use per-site if known train site; otherwise inference macro
+        per_site = scaler_info.get('per_site', {})
+        inference = scaler_info.get('inference', None)
+        if inference is None:
+            raise ValueError("Per-dataset scaler requires 'inference' parameters in process_params['scaler'].")
+
+        X = self.x
+        if self.dataset is None:
+            # No site labels available: apply inference macro to all
+            scaler = scaler_class()
+            for attr, value in inference.items():
+                if attr.endswith("_"):
+                    setattr(scaler, attr, np.array(value))
+            self.x = scaler.transform(X)
+            logger.info(f"applied {base_name} inference macro scaler to all samples (no dataset labels).")
+            self.process_params['scaler'] = scaler_info
+            return
+
+        ds = __as_np(self.dataset)
+        unique_sites_in_batch = np.unique(ds)
+
+        # Apply per-site where available; otherwise inference
+        X_out = np.empty_like(X, dtype=float)
+        used_inference_for = []
+        for site in unique_sites_in_batch:
+            mask = (ds == site)
+            site_key = str(site)
+            scaler = scaler_class()
+            params = per_site.get(site_key, None)
+            if params is None:
+                # held-out site → use inference macro
+                used_inference_for.append(site_key)
+                params = inference
+            for attr, value in params.items():
+                if attr.endswith("_"):
+                    setattr(scaler, attr, np.array(value))
+            X_out[mask] = scaler.transform(X[mask])
+
+        self.x = X_out
+        if used_inference_for:
+            logger.info(f"applied inference macro scaler for held-out site(s): {used_inference_for}")
+        else:
+            logger.info(f"applied per-site scalers for known training sites: {list(unique_sites_in_batch)}")
+
+        self.process_params['scaler'] = scaler_info
+
+        # === Transform path (inference / later stages) ===
+        # Rebuild scaler and apply either per-site or inference params without refitting
+        strategy = scaler_info.get('strategy', 'global')
+        base_name = scaler_info.get('name', base_name).split(':', 1)[0]  # ensure base name
+
+        if strategy == 'global':
+            scaler = scaler_class()
+            # load fitted attributes
+            for attr, value in scaler_info.items():
+                if attr.endswith("_"):
+                    setattr(scaler, attr, np.array(value))
+            self.x = scaler.transform(self.x)
+            logger.info(f"applying pre-fitted global {base_name} scaler.")
+            self.process_params['scaler'] = scaler_info
+            return
+
+        # Per-dataset transform: use per-site if known train site; else inference macro
+        per_site = scaler_info.get('per_site', {})
+        inference = scaler_info.get('inference', None)
+        if inference is None:
+            raise ValueError("Per-dataset scaler requires 'inference' parameters in process_params['scaler'].")
+
+        X = self.x
+        if self.dataset is None:
+            # No site labels available: apply inference macro to all
+            scaler = scaler_class()
+            for attr, value in inference.items():
+                if attr.endswith("_"):
+                    setattr(scaler, attr, np.array(value))
+            self.x = scaler.transform(X)
+            logger.info(f"applied {base_name} inference macro scaler to all samples (no dataset labels).")
+            self.process_params['scaler'] = scaler_info
+            return
+
+        ds = __as_np(self.dataset)
+        unique_sites_in_batch = np.unique(ds)
+
+        # Apply per-site where available; otherwise inference
+        X_out = np.empty_like(X, dtype=float)
+        used_inference_for = []
+        for site in unique_sites_in_batch:
+            mask = (ds == site)
+            site_key = str(site)
+            scaler = scaler_class()
+            params = per_site.get(site_key, None)
+            if params is None:
+                # held-out site → use inference macro
+                used_inference_for.append(site_key)
+                params = inference
+            for attr, value in params.items():
+                if attr.endswith("_"):
+                    setattr(scaler, attr, np.array(value))
+            X_out[mask] = scaler.transform(X[mask])
+
+        self.x = X_out
+        if used_inference_for:
+            logger.info(f"applied inference macro scaler for held-out site(s): {used_inference_for}")
+        else:
+            logger.info(f"applied per-site scalers for known training sites: {list(unique_sites_in_batch)}")
 
         self.process_params['scaler'] = scaler_info
 
