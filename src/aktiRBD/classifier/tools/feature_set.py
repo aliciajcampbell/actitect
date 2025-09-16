@@ -119,8 +119,19 @@ class FeatureSet:
         else:  # no feature ranking needed
             self._apply_scaler()
 
-        if use_smote:  # apply smote
-            self._apply_smote(smote_seed)
+        if use_smote:
+            if isinstance(use_smote, str):
+                smote_mode = use_smote.lower()
+            else:
+                smote_mode = 'global'  # legacy True == global
+
+            # Optional: auto-default to per_ds if scaler strategy is per_ds*
+            if smote_mode == 'global':
+                strat = self.process_params.get('scaler', {}).get('strategy', 'global')
+                if isinstance(strat, str) and strat.startswith('per_ds'):
+                    smote_mode = 'per_ds'
+
+            self._apply_smote(smote_seed, mode=smote_mode)
 
         return self
 
@@ -218,8 +229,8 @@ class FeatureSet:
 
         Strategy encoding (in scaler_info['name']):
           - 'standard' | 'robust' | 'minmax'                 -> global (current behavior)
-          - 'standard:per-ds-macro'                          -> per-dataset fit + unweighted macro inference
-          - 'standard:per-ds-macro-w'                        -> per-dataset fit + size-weighted macro inference
+          - 'standard:per_ds-macro'                          -> per-dataset fit + unweighted macro inference
+          - 'standard:per_ds-macro-w'                        -> per-dataset fit + size-weighted macro inference
         (Works analogously for 'robust' and 'minmax'.)
 
         Notes:
@@ -478,24 +489,114 @@ class FeatureSet:
 
         self.process_params['scaler'] = scaler_info
 
-    def _apply_smote(self, seed: int):
-        """ Applies SMOTE (Synthetic Minority Oversampling Technique) to the FeatureSet.
-        Parameters:
-            :param seed (int): Seed for SMOTE reproducibility.
+    def _apply_smote(self, seed: int, mode: str = 'global'):
+        """
+        Apply SMOTE either globally (pooled) or per dataset (site-wise), and store per-site details.
+        - mode: 'global' (default) | 'per_ds'
         Updates:
-            self.x: Augmented features.
-            self.y: Augmented labels.
-            self.group: Updated group mappings.
-            self.smote_mask: Mask indicating synthetic samples.
-            self.process_params['SMOTE']: SMOTE-related parameters."""
-        # apply smote (logging handled internally)
-        x_smote, y_smote, group_smote, dataset_smote, smote_mask = apply_smote_with_group_mapping(
-            self.x, self.y, self.group, self.dataset, seed)
-        # update class attributes
-        self.x, self.y, self.group, self.dataset, self.smote_mask = \
-            x_smote, y_smote, group_smote, dataset_smote, smote_mask
-        num_new_samples = x_smote.shape[0] - self.x.shape[0]
-        self.process_params['SMOTE'] = {'used': True, 'num_new_samples': num_new_samples, 'seed': seed}
+            self.x, self.y, self.group, self.dataset, self.smote_mask
+            self.process_params['SMOTE'] = {
+                'used': True,
+                'mode': 'global' | 'per_ds',
+                'seed': seed,
+                'num_new_samples': <int total>,
+                'per_site': { '<site_id>': <int new samples>, ... }  # only if dataset labels available
+            }
+        """
+        mode = (mode or 'global').lower()
+        if mode not in {'global', 'per_ds'}:
+            raise ValueError(f"Unknown SMOTE mode '{mode}'. Use 'global' or 'per_ds'.")
+
+        # Helper: per-site counts for a dataset vector
+        def _counts_by_site(ds_vec):
+            ds_arr = np.asarray(ds_vec) if ds_vec is not None else None
+            if ds_arr is None:
+                return {}
+            sites, counts = np.unique(ds_arr, return_counts=True)
+            return {str(s): int(c) for s, c in zip(sites, counts)}
+
+        # -----------------------
+        # GLOBAL SMOTE (pooled)
+        # -----------------------
+        if mode == 'global' or self.dataset is None:
+            before_n_total = int(self.x.shape[0])
+            before_site_counts = _counts_by_site(self.dataset)
+
+            x_sm, y_sm, g_sm, ds_sm, m_sm = apply_smote_with_group_mapping(
+                self.x, self.y, self.group, self.dataset, seed
+            )
+            self.x, self.y, self.group, self.dataset, self.smote_mask = x_sm, y_sm, g_sm, ds_sm, m_sm
+
+            after_n_total = int(self.x.shape[0])
+            num_new_total = after_n_total - before_n_total
+
+            per_site_new = {}
+            if ds_sm is not None:
+                after_site_counts = _counts_by_site(ds_sm)
+                all_sites = set(before_site_counts.keys()) | set(after_site_counts.keys())
+                for s in all_sites:
+                    per_site_new[s] = int(after_site_counts.get(s, 0) - before_site_counts.get(s, 0))
+
+            self.process_params['SMOTE'] = {
+                'used': True,
+                'mode': 'global',
+                'seed': seed,
+                'num_new_samples': int(num_new_total),
+                'per_site': per_site_new
+            }
+            return
+
+        # -----------------------
+        # PER-DATASET SMOTE
+        # -----------------------
+        ds = np.asarray(self.dataset)
+        unique_sites = np.unique(ds)
+
+        xs, ys, gs, dss, masks = [], [], [], [], []
+        per_site_new = {}
+        base_n_total = 0
+
+        for site in unique_sites:
+            mask = (ds == site)
+            x_sub, y_sub, g_sub = self.x[mask], self.y[mask], self.group[mask]
+            ds_sub = self.dataset[mask] if self.dataset is not None else None
+            before_n = int(x_sub.shape[0])
+
+            try:
+                x_sm, y_sm, g_sm, ds_sm, m_sm = apply_smote_with_group_mapping(
+                    x_sub, y_sub, g_sub, ds_sub, seed
+                )
+            except Exception as e:
+                # If SMOTE fails (e.g., too few minority samples), fall back to no change for this site
+                logger.warning(f"SMOTE failed for site '{site}': {e}. Skipping SMOTE for this site.")
+                x_sm, y_sm, g_sm, ds_sm = x_sub, y_sub, g_sub, ds_sub
+                m_sm = np.zeros(before_n, dtype=bool)
+
+            xs.append(x_sm)
+            ys.append(y_sm)
+            gs.append(g_sm)
+            dss.append(ds_sm)
+            masks.append(m_sm)
+
+            after_n = int(x_sm.shape[0])
+            per_site_new[str(site)] = int(after_n - before_n)
+            base_n_total += before_n
+
+        # Concatenate per-site results
+        self.x = np.vstack(xs)
+        self.y = np.concatenate(ys)
+        self.group = np.concatenate(gs)
+        self.dataset = np.concatenate(dss) if dss[0] is not None else None
+        self.smote_mask = np.concatenate(masks)
+
+        num_new_total = int(sum(per_site_new.values()))
+        self.process_params['SMOTE'] = { 'used': True, 'mode': 'per_ds', 'seed': seed,
+            'num_new_samples': num_new_total, 'per_site': per_site_new}
+
+        site_str = ", ".join(f"{s}: +{n}" for s, n in sorted(per_site_new.items()))
+        logger.info(
+            f"Applied per-dataset SMOTE: {num_new_total} synthetic samples added "
+            f"({site_str})")
 
     def _get_feature_ranking(self, rank_kwargs: dict):
         """ Applies feature ranking to the FeatureSet based on the specified ranking method.
