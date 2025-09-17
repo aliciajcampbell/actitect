@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
 from sklearn.model_selection import StratifiedGroupKFold, LeaveOneGroupOut
+from sklearn.utils.validation import has_fit_parameter
 from skopt.plots import plot_convergence
 
 from aktiRBD import utils
@@ -148,7 +149,7 @@ class NestedCVBase(ABC):
 
     def _perform_outer_fold(self, k_outer, train_outer, valid_outer, save_path_repeat, *, outer_seed):
 
-        with self._handle_parallel_logging():
+        with (self._handle_parallel_logging()):
 
             save_path_fold = utils.check_make_dir(save_path_repeat.joinpath(f'outer_fold_{k_outer}'), True)
             inner_seed = self.inner_seeds[outer_seed][k_outer]
@@ -212,6 +213,28 @@ class NestedCVBase(ABC):
             train_outer_top_k = train_outer.select_features(selected_feats)
             valid_outer_top_k = valid_outer.select_features(selected_feats)
 
+            weight_mode = getattr(self.config.model, "dataset_weighting", None)  # None | 'dsw' | 'dswc'
+            if weight_mode and train_outer_top_k.dataset is None:
+                logger.warning("dataset_weighting is set but no dataset labels present; skipping weighting.")
+
+            ds_sample_weight_train = None
+            if weight_mode and (train_outer_top_k.dataset is not None):
+                if weight_mode not in {"dsw", "dswc"}:
+                    logger.warning(
+                        f"Unknown dataset_weighting='{weight_mode}', expected 'dsw' or 'dswc'; skipping weighting.")
+                else:
+                    if weight_mode == "dswc":
+                        ds_sample_weight_train = self.dataset_class_equal_weights(
+                            train_outer_top_k.dataset, train_outer_top_k.y)
+                    else:
+                        ds_sample_weight_train = self.dataset_equal_weights(train_outer_top_k.dataset)
+
+                    # log composition + weight range
+                    u_tr, c_tr = np.unique(train_outer_top_k.dataset, return_counts=True)
+                    comp_tr = ", ".join(f"{u}: n={c}" for u, c in zip(u_tr, c_tr))
+                    logger.info(f"Main fit weighting mode='{weight_mode}'; train comp [{comp_tr}];"
+                                f" w-range=[{ds_sample_weight_train.min():.3f}, {ds_sample_weight_train.max():.3f}]")
+
             # fit and eval optimized model:
             for early_stopping in self.early_stopping_options:
 
@@ -265,7 +288,7 @@ class NestedCVBase(ABC):
 
                     if use_dsw or use_dswc:  # optionally get sample weights to balance dataset biases in calibration
                         if fs_calib.dataset is None:  # no site labels available → fall back to unweighted
-                            sample_weight = None
+                            calib_sample_weight = None
                             logger.warning("Calibration requested with dataset weighting, but no dataset labels found; "
                                            "falling back to unweighted calibration.")
                         else:
@@ -275,33 +298,47 @@ class NestedCVBase(ABC):
                                     "Dataset weighting requested but calibration view contains a single dataset; "
                                     "weights will be effectively uniform.")
                             ds_calib = fs_calib.dataset
-                            sample_weight = (self.dataset_class_equal_weights(ds_calib, fs_calib.y)
-                                             if use_dswc else self.dataset_equal_weights(ds_calib))
+                            calib_sample_weight = (self.dataset_class_equal_weights(ds_calib, fs_calib.y)
+                                                   if use_dswc else self.dataset_equal_weights(ds_calib))
 
                             # extra sanity/logging
                             uniq, cnt = np.unique(ds_calib, return_counts=True)
                             comp = ", ".join(f"{u}: n={c}" for u, c in zip(uniq, cnt))
-                            w_min, w_max = float(sample_weight.min()), float(sample_weight.max())
+                            w_min, w_max = float(calib_sample_weight.min()), float(calib_sample_weight.max())
                             logger.info(f"Calibration dataset composition [{comp}]; "
                                         f"weight mode={'dswc' if use_dswc else 'dsw'}; "
                                         f"weight range [{w_min:.3f}, {w_max:.3f}].")
                     else:
-                        sample_weight = None
+                        calib_sample_weight = None
 
                     calibrated_cv = CustomCalibratedClassifierCV(
                         estimator=opt_model, method=base_method, cv=cv_splits, pass_fold_as_eval_set=True,
                         n_jobs=self.n_jobs)
                     logger.info(f"Training calibrated model with method='{base_method}' "
                                 f"on {'unSMOTEd' if use_unsmoted else 'SMOTEd'} calibration data.")
-                    if sample_weight is not None:
-                        assert len(sample_weight) == len(fs_calib.y), \
+                    if calib_sample_weight is not None:
+                        assert len(calib_sample_weight) == len(fs_calib.y), \
                             "sample_weight length must match calibration sample count."
                     opt_model = calibrated_cv.fit(
-                        fs_calib.x, fs_calib.y, groups=fs_calib.group, sample_weight=sample_weight, verbose=False)
+                        fs_calib.x, fs_calib.y, groups=fs_calib.group, sample_weight=calib_sample_weight, verbose=False)
 
                 else:
-                    opt_model.fit(train_outer_top_k.x, train_outer_top_k.y, eval_set=_eval_set, verbose=False)
-                    opt_model.set_params(**{'early_stopping_rounds': None, 'eval_metric': None})  # reset
+
+                    fit_kwargs = dict()
+                    for param_name, param_val in \
+                            {'sample_weight': ds_sample_weight_train, 'eval_set': _eval_set, 'verbose': False}.items():
+                        if not param_val is None:
+                            if has_fit_parameter(opt_model, param_name):
+                                fit_kwargs[param_name] = param_val
+                            else:
+                                logger.warning(f"Estimator does not support '{param_name}' parameter.")
+                    if fit_kwargs.get('sample_weight', None) is not None:
+                        logger.info(f"Using dataset sampling weights for model fit.")
+                    opt_model.fit(train_outer_top_k.x, train_outer_top_k.y, **fit_kwargs)
+                    try:
+                        opt_model.set_params(**{'early_stopping_rounds': None, 'eval_metric': None})  # reset
+                    except (ValueError, TypeError, AttributeError):
+                        pass
 
                 # predict probabilities and calculate thresholds
                 train_outer_top_k.prob = opt_model.predict_proba(train_outer_top_k.x)[:, 1]

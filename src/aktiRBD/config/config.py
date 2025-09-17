@@ -115,6 +115,7 @@ class ModelConfig(BaseConfig):
     bayes_params: BayesParamsConfig
     feature_selection: Optional[FeatureSelectionConfig]
     hp_overrides: Optional[Dict[str, Any]] = None
+    dataset_weighting: Optional[str] = None
 
 
 @dataclass
