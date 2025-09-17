@@ -227,20 +227,50 @@ class NestedCVBase(ABC):
                     _suffix = 'no_early_stopping'
 
                 if self.calibration:
-                    assert self.calibration in ['sigmoid', 'isotonic'], \
-                        f"calibration must be 'sigmoid' or 'isotonic' not '{self.calibration}'."
+                    calib_opt = self.calibration.lower()
+                    assert calib_opt in {'sigmoid', 'isotonic', 'sigmoid:unsmoted', 'isotonic:unsmoted'}, \
+                        f"calibration must be 'sigmoid'/'isotonic' (optionally with ':unsmoted'), not '{self.calibration}'."
+                    base_method = calib_opt.split(':', 1)[0]  # 'sigmoid' or 'isotonic'
 
+                    # stratification labels (class × dataset if enabled)
                     _y_strat_outer_top_k = train_outer_top_k.get_strat_labels(
                         self.config.nested_cv.stratify_by_dataset_if_pooled)
+
+                    use_unsmoted = calib_opt.endswith(':unsmoted')  # preserve prevalence if enabled
+                    if use_unsmoted:
+                        sm = getattr(train_outer_top_k, 'smote_mask', None)
+                        if sm is None:
+                            logger.warning("Calibration requested with ':unsmoted', but 'smote_mask' is None. "
+                                           "Assuming no SMOTE was applied; using all training samples for calibration.")
+                            true_mask = np.ones(len(train_outer_top_k.y), dtype=bool)
+                        else:
+                            true_mask = ~sm
+                            n_total, n_kept = len(sm), int(true_mask.sum())
+                            logger.info(f"Using unSMOTEd subset for calibration: kept {n_kept}/{n_total} original "
+                                        f"samples (dropped {n_total - n_kept} synthetic).")
+
+                        x_calib = train_outer_top_k.x[true_mask]
+                        y_calib = train_outer_top_k.y[true_mask]
+                        y_str_cal = _y_strat_outer_top_k[true_mask]
+                        group_cal = train_outer_top_k.group[true_mask]
+                    else:
+                        logger.info("Using SMOTEd training data for calibration (prevalence may be distorted).")
+                        x_calib = train_outer_top_k.x
+                        y_calib = train_outer_top_k.y
+                        y_str_cal = _y_strat_outer_top_k
+                        group_cal = train_outer_top_k.group
+
                     _sgkf = StratifiedGroupKFold(**self.config.nested_cv.inner_cv.dict(), random_state=inner_seed)
-                    cv_splits = list(_sgkf.split(
-                        X=train_outer_top_k.x, y=_y_strat_outer_top_k, groups=train_outer_top_k.group))
+                    cv_splits = list(_sgkf.split(X=x_calib, y=y_str_cal, groups=group_cal))
+                    logger.info(f"Calibration CV: {len(cv_splits)} folds with StratifiedGroupKFold.")
+
                     calibrated_cv = CustomCalibratedClassifierCV(
-                        estimator=opt_model, method=self.calibration, cv=cv_splits,
-                        pass_fold_as_eval_set=True, n_jobs=self.n_jobs)
-                    logger.info(f"Training model with {self.calibration} calibration.")
-                    opt_model = calibrated_cv.fit(
-                        train_outer_top_k.x, train_outer_top_k.y, groups=train_outer_top_k.group, verbose=False)
+                        estimator=opt_model, method=base_method, cv=cv_splits, pass_fold_as_eval_set=True,
+                        n_jobs=self.n_jobs)
+                    logger.info(f"Training calibrated model with method='{base_method}' "
+                                f"on {'unSMOTEd' if use_unsmoted else 'SMOTEd'} calibration data.")
+                    opt_model = calibrated_cv.fit(x_calib, y_calib, groups=group_cal, verbose=False)
+
                 else:
                     opt_model.fit(train_outer_top_k.x, train_outer_top_k.y, eval_set=_eval_set, verbose=False)
                     opt_model.set_params(**{'early_stopping_rounds': None, 'eval_metric': None})  # reset

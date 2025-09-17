@@ -61,8 +61,9 @@ class FeatureSet:
         new_x = self.x[:, selected_indices]
         new_feat_map = self.feat_map[selected_indices]
         return FeatureSet(
-            x=new_x, y=self.y, group=self.group, feat_map=new_feat_map,
-            process_params=self.process_params, prob=self.prob, dataset=self.dataset)
+            x=new_x, y=self.y, group=self.group, feat_map=new_feat_map, process_params=self.process_params,
+            prob=self.prob, dataset=self.dataset, smote_mask=self.smote_mask, y_str=self.y_str,
+            from_fold=self.from_fold, feat_rank=self.feat_rank)
 
     def select_samples(self, sample_indices):
         """ Select a subset of samples based on provided indices.
@@ -75,8 +76,11 @@ class FeatureSet:
         new_group = self.group[sample_indices]
         new_prob = self.prob[sample_indices] if self.prob is not None else None
         new_dataset = self.dataset[sample_indices] if self.dataset is not None else None
+        new_smote_mask = self.smote_mask[sample_indices] if self.smote_mask is not None else None
+        new_y_str = self.y_str[sample_indices] if self.y_str is not None else None
         return FeatureSet(x=new_x, y=new_y, group=new_group, feat_map=self.feat_map, process_params=self.process_params,
-                          prob=new_prob, dataset=new_dataset)
+                          prob=new_prob, dataset=new_dataset, smote_mask=new_smote_mask, y_str=new_y_str,
+                          from_fold=self.from_fold, feat_rank=self.feat_rank)
 
     def filter_patients_min_nights(self, min_nights: int) -> "FeatureSet":
         """Return a new FeatureSet that keeps only those patients (i.e. `group` IDs)
@@ -175,7 +179,7 @@ class FeatureSet:
         merged_x = np.vstack((self.x, other.x))
         merged_y = np.concatenate((self.y, other.y))
         merged_group = np.concatenate((self.group, other.group))
-        # optionally merge probabilities if both are present
+
         merged_prob = None
         if self.prob is not None and other.prob is not None:
             merged_prob = np.concatenate((self.prob, other.prob))
@@ -184,9 +188,16 @@ class FeatureSet:
         if self.dataset is not None and other.dataset is not None:
             merged_dataset = np.concatenate((self.dataset, other.dataset))
 
-        return FeatureSet(
-            x=merged_x, y=merged_y, group=merged_group, feat_map=self.feat_map,
-            process_params=None, prob=merged_prob, dataset=merged_dataset)
+        merged_smote = None
+        if self.smote_mask is not None and other.smote_mask is not None:
+            merged_smote = np.concatenate((self.smote_mask, other.smote_mask))
+
+        merged_y_str = None
+        if self.y_str is not None and other.y_str is not None:
+            merged_y_str = np.concatenate((self.y_str, other.y_str))
+
+        return FeatureSet(x=merged_x, y=merged_y, group=merged_group, feat_map=self.feat_map, feat_rank=self.feat_rank,
+            process_params=None, smote_mask=merged_smote, prob=merged_prob, y_str=merged_y_str, dataset=merged_dataset)
 
     def get_strat_labels(self, stratify_by_dataset_if_pooled: bool = False):
         """ Create labels for stratification based on the y and dataset. For non_pooled datasets, just by class."""
