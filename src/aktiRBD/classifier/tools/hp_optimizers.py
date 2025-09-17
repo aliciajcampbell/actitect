@@ -146,6 +146,8 @@ class BayesianOptCV:
         self.feature_map = feat_rank_map or {}
         self._assert_all_param_names_valid(exclude=['top_k_feats'])
 
+        self.dataset_weighting, self.ds_vector = None, None
+
     def _assert_all_param_names_valid(self, exclude):
         _valid_xgb_params = sorted(list(self.model.get_params().keys()))
         _all_params = sorted([param.name for param in self.param_space] + list(self.fixed_params.keys()))
@@ -157,19 +159,28 @@ class BayesianOptCV:
 
     @staticmethod
     def _objective(_x, _y, _y_strat, _model, _params, _fixed_params, _cv_params, _score_weights, _use_early_stopping,
-                   _seed, _n_jobs):
+                   _seed, _n_jobs, _dataset_weighting, _ds_vector):
         _params.update(_fixed_params)
         _model.set_params(**_params)
         _cv_results = perform_stratified_group_cv(_model, _x, _y, _y_strat, **_cv_params,
                                                   use_early_stopping=_use_early_stopping,
-                                                  random_seed_splitting=_seed, n_jobs=_n_jobs)
+                                                  random_seed_splitting=_seed, n_jobs=_n_jobs,
+                                                  dataset_weighting=_dataset_weighting, ds_vector=_ds_vector)
 
         _score = (_cv_results.scoring['night']['default_thresh']['f1']['mean']
                   + _cv_results.scoring['night']['default_thresh']['auc']['mean']) / 2
 
         return -_score  # for gp_minimize minus is needed
 
-    def fit(self, x, y, y_strat, cv_params, n_calls: int, use_early_stopping: bool, n_jobs: int, verbose: bool = True):
+    def fit(self, x, y, y_strat, cv_params, n_calls: int, use_early_stopping: bool, n_jobs: int,
+            dataset_weighting: str = None, ds_vector: np.ndarray = None,  verbose: bool = True):
+
+        self.dataset_weighting = dataset_weighting
+        self.ds_vector = ds_vector
+
+        if dataset_weighting is not None:
+            logger.info(f"using mode='{dataset_weighting}' weighting for dataset weighting for Bayesian HP tuning.")
+
         def objective(params):
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=LineSearchWarning)
@@ -180,10 +191,11 @@ class BayesianOptCV:
                         raise ValueError("top_k_feats in param space but no feature_map was provided")
                     _top_k_feat_idcs = [val['idx'] for val in self.feature_map.values() if val['rank'] <= top_k]
                     x_sel_feats = x[:, _top_k_feat_idcs]
-                else: # no ranking used, just keep all features
+                else:  # no ranking used, just keep all features
                     x_sel_feats = x
                 return self._objective(x_sel_feats, y, y_strat, self.model, param_dict, self.fixed_params, cv_params,
-                                       self.cv_score_weights, use_early_stopping, _seed=self.seed, _n_jobs=n_jobs)
+                                       self.cv_score_weights, use_early_stopping, _seed=self.seed, _n_jobs=n_jobs,
+                                       _dataset_weighting=self.dataset_weighting, _ds_vector=self.ds_vector)
 
         optimizer_kwargs = {
             'n_calls': n_calls,  # (int, 100)

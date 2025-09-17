@@ -81,7 +81,8 @@ __all__ = [
     'compute_mean_std_ci',
     'optional_njit',
     'sensitivity_specificity_from_cm',
-    'fischer_freeman_hilton_exact_test'
+    'fischer_freeman_hilton_exact_test',
+    'compute_composite_dataset_weights'
 ]
 
 logger = logging.getLogger(__name__)
@@ -1058,6 +1059,7 @@ def fischer_freeman_hilton_exact_test(table: np.ndarray) -> float:
     for i, xi in enumerate(col1_obs):
         num_obs *= C[i][xi]
     total_num = 0  # accumulated numerator mass over allocations ≤ observed
+
     def _dfs(i: int, remaining: int, num_so_far: int) -> None:
         nonlocal total_num
         if i == R - 1:
@@ -1086,3 +1088,27 @@ def fischer_freeman_hilton_exact_test(table: np.ndarray) -> float:
 
     # Convert summed numerators to probability once.
     return total_num / comb(N, col1_tot)
+
+
+def compute_composite_dataset_weights(ds_vec: np.ndarray, y_vec: np.ndarray, mode: str):
+    if mode is None or ds_vec is None:
+        return None
+    if mode == 'dsw':
+        N = len(ds_vec)
+        uniq, counts = np.unique(ds_vec, return_counts=True)
+        per_ds = dict(zip(uniq, counts))
+        base = N / len(uniq)
+        w = np.array([base / per_ds[d] for d in ds_vec], dtype=float)
+        return w * (N / w.sum())
+    elif mode == 'dswc':
+        N = len(ds_vec)
+        cells, counts = np.unique(np.stack([ds_vec, y_vec], axis=1), axis=0, return_counts=True)
+        per_cell = {(d, int(c)): n for (d, c), n in zip(map(tuple, cells), counts)}
+        G = len(np.unique(ds_vec));
+        C = len(np.unique(y_vec))
+        base = N / (G * C)
+        w = np.array([base / per_cell[(d, int(y_))] for d, y_ in zip(ds_vec, y_vec)], dtype=float)
+        return w * (N / w.sum())
+    else:
+        raise ValueError(f"Unknown mode {mode}")
+

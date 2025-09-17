@@ -50,6 +50,21 @@ class NestedCVBase(ABC):
 
         self.use_fixed_features = bool(getattr(self.config.model.feature_selection, 'fixed_features', None))
 
+        raw_ds_mode = getattr(config.model, 'dataset_weighting', None) # e.g. dsw:bay_on
+        if raw_ds_mode:
+            mode_part, flag_part = (raw_ds_mode.split(":", 1) + ['bay_off'])[:2]
+            mode, flag = mode_part.lower().strip(), flag_part.lower().strip()
+            if mode not in {'dsw', 'dswc'}:
+                logger.warning(
+                    f"Unknown dataset_weighting mode '{mode_part}', expected 'dsw' or 'dswc'. Disabling weighting.")
+                self.ds_weighting_kwargs = None
+            else:
+                use_bayes = flag in {'bay_on', 'bon'}
+                logger.info(f"Using dataset_weighting mode '{mode}' with using bayes = {use_bayes}.")
+                self.ds_weighting_kwargs = {'mode': mode, 'use_bayes': use_bayes}
+        else:
+            self.ds_weighting_kwargs = None
+
     def __str__(self) -> str:
 
         def __fmt(val):
@@ -186,7 +201,12 @@ class NestedCVBase(ABC):
                 fit_params.update({'cv_params': {
                     'group': train_outer.group, 'n_folds': self.config.nested_cv.inner_cv.n_splits,
                     'shuffle': self.config.nested_cv.inner_cv.shuffle, 'verbose': False},
-                    'n_jobs': 1 if self.n_jobs != 1 else -1})
+                    'n_jobs': 1 if self.n_jobs != 1 else -1,
+                    'dataset_weighting': None, 'ds_vector': None})
+
+                if self.ds_weighting_kwargs and self.ds_weighting_kwargs.get('use_bayes', False):
+                    fit_params.update({'dataset_weighting': self.ds_weighting_kwargs['mode'],
+                                       'ds_vector': getattr(train_outer, 'dataset', None)})
 
                 opt_params, best_score = self._perform_inner_cv_bayes_opt(
                     outer_fold=train_for_bayes, model_setup=model_setup, rank_map=train_outer.feat_rank,
@@ -213,21 +233,19 @@ class NestedCVBase(ABC):
             train_outer_top_k = train_outer.select_features(selected_feats)
             valid_outer_top_k = valid_outer.select_features(selected_feats)
 
-            weight_mode = getattr(self.config.model, "dataset_weighting", None)  # None | 'dsw' | 'dswc'
-            if weight_mode and train_outer_top_k.dataset is None:
+            if self.ds_weighting_kwargs and train_outer_top_k.dataset is None:
                 logger.warning("dataset_weighting is set but no dataset labels present; skipping weighting.")
 
             ds_sample_weight_train = None
-            if weight_mode and (train_outer_top_k.dataset is not None):
-                if weight_mode not in {"dsw", "dswc"}:
+            if self.ds_weighting_kwargs and (train_outer_top_k.dataset is not None):
+                weight_mode = self.ds_weighting_kwargs['mode']
+                if weight_mode not in {'dsw', 'dswc'}:
                     logger.warning(
                         f"Unknown dataset_weighting='{weight_mode}', expected 'dsw' or 'dswc'; skipping weighting.")
                 else:
-                    if weight_mode == "dswc":
-                        ds_sample_weight_train = self.dataset_class_equal_weights(
-                            train_outer_top_k.dataset, train_outer_top_k.y)
-                    else:
-                        ds_sample_weight_train = self.dataset_equal_weights(train_outer_top_k.dataset)
+
+                    ds_sample_weight_train = utils.compute_composite_dataset_weights(
+                        ds_vec=train_outer_top_k.dataset, y_vec=train_outer_top_k.y, mode=weight_mode)
 
                     # log composition + weight range
                     u_tr, c_tr = np.unique(train_outer_top_k.dataset, return_counts=True)
@@ -298,8 +316,7 @@ class NestedCVBase(ABC):
                                     "Dataset weighting requested but calibration view contains a single dataset; "
                                     "weights will be effectively uniform.")
                             ds_calib = fs_calib.dataset
-                            calib_sample_weight = (self.dataset_class_equal_weights(ds_calib, fs_calib.y)
-                                                   if use_dswc else self.dataset_equal_weights(ds_calib))
+                            calib_sample_weight = utils.compute_composite_dataset_weights(ds_calib, fs_calib.y, w_mode)
 
                             # extra sanity/logging
                             uniq, cnt = np.unique(ds_calib, return_counts=True)
@@ -771,31 +788,6 @@ class NestedCVBase(ABC):
     @staticmethod
     def _count_unique_datasets(data: FeatureSet):
         return len(np.unique(data.dataset)) if data.dataset is not None else 1
-
-    @staticmethod
-    def dataset_equal_weights(ds_vec: np.ndarray):
-        # equal total weight per dataset
-        # w_i = (N/G) / n_g, normalized so mean weight ~ 1
-        N = len(ds_vec)
-        uniq, counts = np.unique(ds_vec, return_counts=True)
-        per_ds = dict(zip(uniq, counts))
-        base = (N / len(uniq))
-        w = np.array([base / per_ds[d] for d in ds_vec], dtype=float)
-        # optional: normalize to mean weight = 1 (not strictly necessary)
-        return w * (N / w.sum())
-
-    @staticmethod
-    def dataset_class_equal_weights(ds_vec: np.ndarray, y_vec: np.ndarray):
-        # equal total weight per (dataset, class)
-        N = len(ds_vec)
-        cells, counts = np.unique(np.stack([ds_vec, y_vec], axis=1), axis=0, return_counts=True)
-        per_cell = {(d, int(c)): n for (d, c), n in zip(map(tuple, cells), counts)}
-        G = len(np.unique(ds_vec))
-        C = len(np.unique(y_vec))
-        base = N / (G * C)
-        w = np.array([base / per_cell[(d, int(y))] for d, y in zip(ds_vec, y_vec)], dtype=float)
-        return w * (N / w.sum())
-
 
 class KFoldNestedCV(NestedCVBase):
 

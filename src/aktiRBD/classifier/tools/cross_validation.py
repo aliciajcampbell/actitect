@@ -7,8 +7,11 @@ import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
 from sklearn import metrics, model_selection
+from sklearn.utils.validation import has_fit_parameter
+
 
 from aktiRBD.classifier.tools.classification_threshold import get_operating_point, classify_with_threshold
+from aktiRBD import utils
 
 __all__ = ['perform_stratified_group_cv', 'perform_loocv']
 logger = logging.getLogger(__name__)
@@ -36,6 +39,8 @@ def perform_stratified_group_cv(
         return_history: bool = False,
         verbose: bool = False,
         debug_print: bool = False,
+        dataset_weighting: str = None,
+        ds_vector: np.ndarray = None,
 ):
     """
     TODO: clean up function, some artifacts from non-parallelized version
@@ -136,7 +141,7 @@ def perform_stratified_group_cv(
 
     def _cross_val_fold(k, train_index, val_index, model, x_train, y_train, group, use_early_stopping,
                         patient_aggregation_function, return_history, debug_print, mean_roc_fpr, _methods,
-                        _scoring_history_placeholder):
+                        _scoring_history_placeholder, dataset_weighting, ds_vector):
         local_scoring_history_per_night = {}
         local_scoring_history_per_patient = {method: copy.deepcopy(_scoring_history_placeholder) for method in _methods}
         local_misclassified_patients_per_fold = {}
@@ -147,6 +152,24 @@ def perform_stratified_group_cv(
         x_valid_fold, y_valid_fold = x_train[val_index], y_train[val_index]
         group_train = group[train_index]
         group_valid = group[val_index]
+
+        sample_weight = None
+        if (dataset_weighting in {"dsw", "dswc"}) and (ds_vector is not None):
+            # ds_vector is aligned with x_train; slice to the train fold
+            ds_vec_tr = ds_vector[train_index]
+            sample_weight = utils.compute_composite_dataset_weights(
+                ds_vec=ds_vec_tr, y_vec=y_train_fold, mode=dataset_weighting)
+
+        # build fit kwargs guarded by estimator API
+        fit_kwargs = {}
+        if (sample_weight is not None) and has_fit_parameter(model, "sample_weight"):
+            fit_kwargs["sample_weight"] = sample_weight
+        if has_fit_parameter(model, "eval_set"):
+            fit_kwargs["eval_set"] = [(x_train_fold, y_train_fold), (x_valid_fold, y_valid_fold)]
+        if has_fit_parameter(model, "verbose"):
+            fit_kwargs["verbose"] = False
+        elif has_fit_parameter(model, "verbosity"):
+            fit_kwargs["verbosity"] = 0
 
         if debug_print:
             n_hc_train, n_rbd_train = np.unique(y_train_fold, return_counts=True)[1]
@@ -163,12 +186,18 @@ def perform_stratified_group_cv(
             print(f"valid ids: {np.unique(group_valid)}")
 
         if use_early_stopping:
-            _eval_set = [(x_train_fold, y_train_fold), (x_valid_fold, y_valid_fold)]
-            model.set_params(**{'early_stopping_rounds': 10, 'eval_metric': ['logloss']})
-            model.fit(x_train_fold, y_train_fold, eval_set=_eval_set, verbose=False)
-            model.set_params(**{'early_stopping_rounds': None, 'eval_metric': None})  # reset
+            try:
+                model.set_params(**{'early_stopping_rounds': 10, 'eval_metric': ['logloss']})
+            except (ValueError, TypeError):
+                logger.warning(f"got ValueError/TypeError when setting early_stopping_rounds,"
+                               f" model likely does not support early stopping. ")
+            model.fit(x_train_fold, y_train_fold, **fit_kwargs)
+            try:
+                model.set_params(**{'early_stopping_rounds': None, 'eval_metric': None})  # reset
+            except (ValueError, TypeError):
+                pass
         else:
-            model.fit(x_train_fold, y_train_fold)
+            model.fit(x_train_fold, y_train_fold, **fit_kwargs)
 
         y_prob_valid = model.predict_proba(x_valid_fold)[:, 1]
         _fpr, _tpr, _thresholds = metrics.roc_curve(y_valid_fold, y_prob_valid)
@@ -247,7 +276,8 @@ def perform_stratified_group_cv(
     with Parallel(n_jobs=n_jobs) as parallel_cv:
         results = parallel_cv(delayed(_cross_val_fold)(
             k, train_index, val_index, model, x_train, y_train, group, use_early_stopping, patient_aggregation_function,
-            return_history, debug_print, mean_roc_fpr, _methods, _scoring_history_placeholder)
+            return_history, debug_print, mean_roc_fpr, _methods, _scoring_history_placeholder,
+            dataset_weighting, ds_vector)
                               for k, (train_index, val_index)
                               in enumerate(sgkf.split(x_train, y_strat, group)))
 
