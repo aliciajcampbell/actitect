@@ -1,5 +1,5 @@
 import re
-from dataclasses import dataclass, fields, asdict
+from dataclasses import dataclass, fields, asdict, MISSING
 from pathlib import Path
 from typing import Type, TypeVar, Any, Dict, List, Optional, get_origin, get_args, Union
 
@@ -21,8 +21,20 @@ class BaseConfig:
         for field_ in fields(cls):
             field_name = field_.name
             field_type = cls._unwrap_optional(field_.type)
+
+            # allow missing keys if defaults or Optional[...] exist
             if field_name not in data:
+                if field_.default is not MISSING:
+                    init_kwargs[field_name] = field_.default
+                    continue
+                if field_.default_factory is not MISSING:  # type: ignore[attr-defined]
+                    init_kwargs[field_name] = field_.default_factory()  # type: ignore[misc]
+                    continue
+                if get_origin(field_.type) is Union and type(None) in get_args(field_.type):
+                    init_kwargs[field_name] = None
+                    continue
                 raise KeyError(f"Missing key '{field_name}' in configuration.")
+
             value = data[field_name]
 
             # Handle nested dataclasses
