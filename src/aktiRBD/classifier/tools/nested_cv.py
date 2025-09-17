@@ -228,48 +228,76 @@ class NestedCVBase(ABC):
 
                 if self.calibration:
                     calib_opt = self.calibration.lower()
-                    assert calib_opt in {'sigmoid', 'isotonic', 'sigmoid:unsmoted', 'isotonic:unsmoted'}, \
-                        f"calibration must be 'sigmoid'/'isotonic' (optionally with ':unsmoted'), not '{self.calibration}'."
+                    use_unsmoted = ':unsmoted' in calib_opt
+                    use_dsw = ':dsw' in calib_opt or ':dswc' in calib_opt
+                    use_dswc = ':dswc' in calib_opt
                     base_method = calib_opt.split(':', 1)[0]  # 'sigmoid' or 'isotonic'
+                    assert base_method in {'sigmoid', 'isotonic'}, \
+                        (f"calibration must be 'sigmoid'/'isotonic' (optionally with ':unsmoted or :dsw/dswc'),"
+                         f" not '{self.calibration}'.")
+                    mode_str = "unSMOTEd" if use_unsmoted else "SMOTEd"
+                    w_mode = "dswc" if use_dswc else ("dsw" if use_dsw else "none")
+                    logger.info(f"Calibration config: method='{base_method}', data={mode_str}, weighting={w_mode}.")
 
-                    # stratification labels (class × dataset if enabled)
-                    _y_strat_outer_top_k = train_outer_top_k.get_strat_labels(
-                        self.config.nested_cv.stratify_by_dataset_if_pooled)
-
-                    use_unsmoted = calib_opt.endswith(':unsmoted')  # preserve prevalence if enabled
                     if use_unsmoted:
                         sm = getattr(train_outer_top_k, 'smote_mask', None)
                         if sm is None:
-                            logger.warning("Calibration requested with ':unsmoted', but 'smote_mask' is None. "
-                                           "Assuming no SMOTE was applied; using all training samples for calibration.")
+                            logger.warning("Calibration ':unsmoted' requested, but 'smote_mask' is None. "
+                                           "Assuming no SMOTE; using all training samples for calibration.")
                             true_mask = np.ones(len(train_outer_top_k.y), dtype=bool)
                         else:
                             true_mask = ~sm
                             n_total, n_kept = len(sm), int(true_mask.sum())
-                            logger.info(f"Using unSMOTEd subset for calibration: kept {n_kept}/{n_total} original "
-                                        f"samples (dropped {n_total - n_kept} synthetic).")
+                            logger.info(f"Calibration subset: kept {n_kept}/{n_total} original (unSMOTEd) samples.")
 
-                        x_calib = train_outer_top_k.x[true_mask]
-                        y_calib = train_outer_top_k.y[true_mask]
-                        y_str_cal = _y_strat_outer_top_k[true_mask]
-                        group_cal = train_outer_top_k.group[true_mask]
+                        # build a consistent calibration FeatureSet view,  using only original samples
+                        fs_calib: FeatureSet = train_outer_top_k.select_samples(np.where(true_mask)[0])
                     else:
-                        logger.info("Using SMOTEd training data for calibration (prevalence may be distorted).")
-                        x_calib = train_outer_top_k.x
-                        y_calib = train_outer_top_k.y
-                        y_str_cal = _y_strat_outer_top_k
-                        group_cal = train_outer_top_k.group
+                        logger.info("Calibration on SMOTEd training data (prevalence may be distorted).")
+                        fs_calib = train_outer_top_k  # use full SMOTEd fold
+
+                    # stratification labels (class × dataset if enabled)
+                    y_str_cal = fs_calib.get_strat_labels(self.config.nested_cv.stratify_by_dataset_if_pooled)
 
                     _sgkf = StratifiedGroupKFold(**self.config.nested_cv.inner_cv.dict(), random_state=inner_seed)
-                    cv_splits = list(_sgkf.split(X=x_calib, y=y_str_cal, groups=group_cal))
+                    cv_splits = list(_sgkf.split(X=fs_calib.x, y=y_str_cal, groups=fs_calib.group))
                     logger.info(f"Calibration CV: {len(cv_splits)} folds with StratifiedGroupKFold.")
+
+                    if use_dsw or use_dswc:  # optionally get sample weights to balance dataset biases in calibration
+                        if fs_calib.dataset is None:  # no site labels available → fall back to unweighted
+                            sample_weight = None
+                            logger.warning("Calibration requested with dataset weighting, but no dataset labels found; "
+                                           "falling back to unweighted calibration.")
+                        else:
+                            uniq_ds = np.unique(fs_calib.dataset)
+                            if len(uniq_ds) == 1:
+                                logger.warning(
+                                    "Dataset weighting requested but calibration view contains a single dataset; "
+                                    "weights will be effectively uniform.")
+                            ds_calib = fs_calib.dataset
+                            sample_weight = (self.dataset_class_equal_weights(ds_calib, fs_calib.y)
+                                             if use_dswc else self.dataset_equal_weights(ds_calib))
+
+                            # extra sanity/logging
+                            uniq, cnt = np.unique(ds_calib, return_counts=True)
+                            comp = ", ".join(f"{u}: n={c}" for u, c in zip(uniq, cnt))
+                            w_min, w_max = float(sample_weight.min()), float(sample_weight.max())
+                            logger.info(f"Calibration dataset composition [{comp}]; "
+                                        f"weight mode={'dswc' if use_dswc else 'dsw'}; "
+                                        f"weight range [{w_min:.3f}, {w_max:.3f}].")
+                    else:
+                        sample_weight = None
 
                     calibrated_cv = CustomCalibratedClassifierCV(
                         estimator=opt_model, method=base_method, cv=cv_splits, pass_fold_as_eval_set=True,
                         n_jobs=self.n_jobs)
                     logger.info(f"Training calibrated model with method='{base_method}' "
                                 f"on {'unSMOTEd' if use_unsmoted else 'SMOTEd'} calibration data.")
-                    opt_model = calibrated_cv.fit(x_calib, y_calib, groups=group_cal, verbose=False)
+                    if sample_weight is not None:
+                        assert len(sample_weight) == len(fs_calib.y), \
+                            "sample_weight length must match calibration sample count."
+                    opt_model = calibrated_cv.fit(
+                        fs_calib.x, fs_calib.y, groups=fs_calib.group, sample_weight=sample_weight, verbose=False)
 
                 else:
                     opt_model.fit(train_outer_top_k.x, train_outer_top_k.y, eval_set=_eval_set, verbose=False)
@@ -706,6 +734,30 @@ class NestedCVBase(ABC):
     @staticmethod
     def _count_unique_datasets(data: FeatureSet):
         return len(np.unique(data.dataset)) if data.dataset is not None else 1
+
+    @staticmethod
+    def dataset_equal_weights(ds_vec: np.ndarray):
+        # equal total weight per dataset
+        # w_i = (N/G) / n_g, normalized so mean weight ~ 1
+        N = len(ds_vec)
+        uniq, counts = np.unique(ds_vec, return_counts=True)
+        per_ds = dict(zip(uniq, counts))
+        base = (N / len(uniq))
+        w = np.array([base / per_ds[d] for d in ds_vec], dtype=float)
+        # optional: normalize to mean weight = 1 (not strictly necessary)
+        return w * (N / w.sum())
+
+    @staticmethod
+    def dataset_class_equal_weights(ds_vec: np.ndarray, y_vec: np.ndarray):
+        # equal total weight per (dataset, class)
+        N = len(ds_vec)
+        cells, counts = np.unique(np.stack([ds_vec, y_vec], axis=1), axis=0, return_counts=True)
+        per_cell = {(d, int(c)): n for (d, c), n in zip(map(tuple, cells), counts)}
+        G = len(np.unique(ds_vec))
+        C = len(np.unique(y_vec))
+        base = N / (G * C)
+        w = np.array([base / per_cell[(d, int(y))] for d, y in zip(ds_vec, y_vec)], dtype=float)
+        return w * (N / w.sum())
 
 
 class KFoldNestedCV(NestedCVBase):
