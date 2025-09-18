@@ -133,8 +133,10 @@ class NestedCVBase(ABC):
                     f"seed_{rank_seed}_{sys.platform}")
                 manifest.setdefault("rankings_root_dirs", {})[f"seed{outer_seed}"] = str(_rankings_root_dir)
                 _rank_kwargs = \
-                    {'root_dir': _rankings_root_dir, 'data_config': self.config.data, 'n_jobs': self.n_jobs} \
+                    {'root_dir': _rankings_root_dir, 'data_config': self.config.data, 'n_jobs': self.n_jobs,
+                     'fair_agg': self.config.model.feature_selection.fair_agg} \
                         if not self.use_fixed_features else None
+
                 save_path_repeat = utils.check_make_dir(self.save_path.joinpath(
                     f"repeats/repeat{repeat}_seed{outer_seed}"), True)
 

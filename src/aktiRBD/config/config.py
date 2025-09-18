@@ -105,6 +105,7 @@ class TopKFeatsConfig(BaseConfig):
 class FeatureSelectionConfig(BaseConfig):
     top_k_feats: TopKFeatsConfig
     fixed_features: Optional[List[str]] = None
+    fair_agg: Optional[str] = None
 
 
 @dataclass

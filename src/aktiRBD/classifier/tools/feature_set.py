@@ -7,6 +7,7 @@ import numpy as np
 from sklearn import preprocessing
 
 from aktiRBD.classifier.tools.apply_smote import apply_smote_with_group_mapping
+from aktiRBD import utils
 
 __all__ = ['FeatureSet', 'Fold']
 
@@ -609,7 +610,7 @@ class FeatureSet:
             f"Applied per-dataset SMOTE: {num_new_total} synthetic samples added "
             f"({site_str})")
 
-    def _get_feature_ranking(self, rank_kwargs: dict):
+    '''def _get_feature_ranking(self, rank_kwargs: dict):
         """ Applies feature ranking to the FeatureSet based on the specified ranking method.
         Parameters:
             :param rank_kwargs (Dict): Arguments for the ranking method.
@@ -617,7 +618,107 @@ class FeatureSet:
                 Dict: Feature rankings (maps each feature to its rank)."""
         from aktiRBD.features.ranking import FeatureRanker
         ranker = FeatureRanker(**rank_kwargs)
-        return ranker.fetch_or_compute(data=self)  # fetch or compute feature ranks
+        return ranker.fetch_or_compute(data=self)  # fetch or compute feature ranks'''
+
+    def _get_feature_ranking(self, rank_kwargs: dict):
+        """
+        If rank_kwargs['fair_agg'] is set and there are multiple datasets in this FeatureSet,
+        load/compute one cached ranking per dataset under <root>/by_dataset/<DS>/..., then
+        aggregate (mean/median/borda) across the train datasets. The aggregated ranking is
+        cached under <root>/by_dataset_fair/fair_<agg>__<DS1+DS2+...>.csv, keyed by the
+        train set composition. Otherwise, fall back to the standard single-run ranking.
+        """
+        from pathlib import Path
+        import numpy as np
+        import pandas as pd
+        from aktiRBD.features.ranking import FeatureRanker
+
+        # Parse fair aggregation request
+        fair_agg = rank_kwargs.get('fair_agg')
+        use_fair = bool(fair_agg)
+        agg = fair_agg if fair_agg else None
+
+        # Keep only valid FeatureRanker kwargs
+        base_root = Path(rank_kwargs['root_dir']) if 'root_dir' in rank_kwargs else None
+        valid_ranker_kwargs = {
+            k: rank_kwargs[k]
+            for k in ('root_dir', 'data_config', 'n_jobs', 'draw_plots', 'random_state')
+            if k in rank_kwargs
+        }
+
+        # Simple path: single dataset or fair disabled -> vanilla ranking
+        if (not use_fair) or (self.dataset is None) or (len(np.unique(self.dataset)) <= 1):
+            ranker = FeatureRanker(**valid_ranker_kwargs)
+            return ranker.fetch_or_compute(data=self, return_df=False)
+
+        # FAIR path: reuse per-dataset caches and aggregate for current train composition
+        unique_ds = np.unique(self.dataset)
+        # Cache aggregated FAIR ranking keyed by train-set composition (sorted for stability)
+        train_key = "+".join(map(str, sorted(unique_ds)))
+        fair_folder = utils.check_make_dir(base_root.joinpath('by_dataset_fair'), use_existing=True)
+        fair_cache = fair_folder.joinpath(f"fair_{agg}__{train_key}.csv")
+
+        logger.info(
+            f"using averaged feature ranking across {len(unique_ds)} datasets "
+            f"with '{agg}' aggregation."
+        )
+
+        # If a combined fair cache exists, just load and map to the usual dict format
+        if fair_cache.exists():
+            rank_df = pd.read_csv(fair_cache).set_index('total_rank')
+            _feature_ranking = rank_df.name.values
+            return {
+                name: {'idx': idx, 'rank': int(np.where(_feature_ranking == name)[0][0] + 1)}
+                for idx, name in enumerate(self.feat_map)
+            }
+
+        # Otherwise, load/compute per-dataset caches (ONE per dataset; no fold-scoped paths) and aggregate
+        per_ds_rank = {}
+        for ds in unique_ds:
+            idx = np.where(self.dataset == ds)[0]
+            fs_ds = self.select_samples(idx)
+
+            # Force "non-fold" mode so FeatureRanker writes/reads from <root>/by_dataset/<DS>/...
+            setattr(fs_ds, 'from_fold', None)
+
+            rk_kwargs = dict(valid_ranker_kwargs)
+            rk_kwargs['root_dir'] = base_root.joinpath('by_dataset', str(ds))
+
+            # This will READ the cached CSV if present; otherwise compute once and write it
+            rk_df = FeatureRanker(**rk_kwargs).fetch_or_compute(data=fs_ds, return_df=True)  # index: feature idx
+            # Normalize to {name -> rank} using current FeatureSet feature ordering/names
+            ser_by_name = pd.Series(rk_df['total_rank'].values,
+                                    index=[self.feat_map[i] for i in rk_df.index])
+            per_ds_rank[str(ds)] = ser_by_name
+
+        # Build a DataFrame: rows=feature names, cols=datasets, values=per-dataset ranks
+        rank_mat = pd.DataFrame(per_ds_rank)  # shape (n_feats, n_ds)
+
+        # Aggregate across datasets
+        if agg == 'median':
+            agg_val = rank_mat.median(axis=1)
+        elif agg == 'borda':
+            # Convert ranks (1..K) to scores (K..1), average scores, then invert so lower is better
+            K = rank_mat.shape[0]
+            scores = K - rank_mat + 1
+            agg_val = -(scores.mean(axis=1))  # negative so sorting ascending gives best first
+        else:  # default to 'mean'
+            agg_val = rank_mat.mean(axis=1)
+
+        # Create combined fair ranking DataFrame in the same shape as FeatureRanker outputs
+        ordered = agg_val.sort_values(kind='mergesort')  # stable
+        out = pd.DataFrame({'name': ordered.index, 'fair_agg_val': ordered.values})
+        out['total_rank'] = np.arange(1, len(out) + 1)
+
+        # Save the fair cache keyed by train composition
+        out.to_csv(fair_cache, index=False)
+
+        # Return in the usual dict format expected downstream
+        name_order = out['name'].values
+        return {
+            name: {'idx': idx, 'rank': int(np.where(name_order == name)[0][0] + 1)}
+            for idx, name in enumerate(self.feat_map)
+        }
 
 
 @dataclass
