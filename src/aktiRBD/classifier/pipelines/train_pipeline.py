@@ -29,8 +29,7 @@ class TrainPipeline(BasePipeline):
         # produce final model(s) for testing
         if not self.config.final_model.skip_pretrain:
             self._run_pretrain(train, test)  # 'test' only needed to create combined cgn training set (ext. test only)
-            # load pretrained models and use for evaluation
-            self._run_eval(test)
+            self._run_eval(test)  # load pretrained models and use for evaluation
         else:
             logger.warning("skipping pretraining of final model, set 'config.final_model.skip_pretrain=True'.")
 
@@ -46,10 +45,10 @@ class TrainPipeline(BasePipeline):
     def _run_pretrain(self, train: FeatureSet, test: FeatureSet):
         _save_path_pretrain = utils.check_make_dir(self.save_path.joinpath('pretrain_hps'), True)
         model_manager_pretrain = ModelManager(self.config, _save_path_pretrain)
-        model_manager_pretrain.pretrain(train.copy(), test.copy(), dataset_save_tag='cgn')
+        model_manager_pretrain.pretrain(train.copy(), extend_train=test.copy(), dataset_save_tag='singleCenter')
 
     def _run_eval(self, test: FeatureSet):
         _save_path_test_cgn = utils.check_make_dir(self.save_path.joinpath('test_cgn'), True)
-        _load_path_models = self.save_path.joinpath('models/models_cgn.joblib')
+        _load_path_models = self.save_path.joinpath('models/singleCenterCore.joblib')
         model_manager_eval = ModelManager(self.config, _save_path_test_cgn)
         model_manager_eval.eval(test, _load_path_models)

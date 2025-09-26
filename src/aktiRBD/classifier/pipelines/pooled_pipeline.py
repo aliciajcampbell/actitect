@@ -92,8 +92,11 @@ class PooledTrainPipeline(BasePipeline):
             str(self._full_rankings_base).replace("feat_rank/full", f"feat_rank/full/{self.ds_suffix}")
         )
 
+        n_datasets = np.unique(train.dataset).shape[0]
+        _save_postfix = 'Core' if n_datasets == 3 else 'Extended'
+
         model_manager_pretrain = ModelManager(self.temp_config, _save_path_pretrain)
-        model_manager_pretrain.pretrain(train.copy(), dataset_save_tag='pooled')
+        model_manager_pretrain.pretrain(train.copy(), dataset_save_tag=f'multiCenter{_save_postfix}')
 
     @staticmethod
     def _reconcile_and_update_config(settings_path: Path, updated_config: dict):

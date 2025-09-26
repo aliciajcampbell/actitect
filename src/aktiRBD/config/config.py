@@ -58,9 +58,9 @@ class BaseConfig:
     def from_yaml(cls, yaml_path: Path = None, which: str = 'internal_cv') -> 'BaseConfig':
         if not yaml_path:
             if which == 'internal_cv':
-                yaml_path = Path(__file__).parent.joinpath('pipeline_internal_cv.yaml')
+                yaml_path = Path(__file__).parent.joinpath('pipeline_singleCenter.yaml')
             elif which == 'external_cv':
-                yaml_path = Path(__file__).parent.joinpath('pipeline_external_cv.yaml')
+                yaml_path = Path(__file__).parent.joinpath('pipeline_multiCenter.yaml')
             elif which == 'external_test':
                 yaml_path = Path(__file__).parent.joinpath('external_test.yaml')
             else:

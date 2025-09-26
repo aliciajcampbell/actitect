@@ -104,7 +104,7 @@ class ModelManager:
 
                 pbar.update(1)
 
-    def pretrain(self, train: FeatureSet, test: FeatureSet = None, *, dataset_save_tag: str):
+    def pretrain(self, train: FeatureSet, extend_train: FeatureSet = None, *, dataset_save_tag: str):
         """Like .eval() but will save the models to a given directory instead of evaluating them directly.
          Mainly used to create the final models for external testing."""
         # init model
@@ -113,8 +113,8 @@ class ModelManager:
 
         # if specified, create a merged cologne training set (train + test), can only be used for external data testing
         train_full_processed, hp_setups_merged = None, []
-        if self.config.final_model.include_pretrain_merged and test is not None:  # <- guard added
-            train_full = train.merge(test)
+        if self.config.final_model.include_pretrain_merged and extend_train is not None:  # <- guard added
+            train_full = train.merge(extend_train)
             train_full_processed = train_full.copy().fit_transform(rank_kwargs=self.rank_kwargs,
                                                                    **self.process_kwargs)
             with self._set_current_context(f'pretrain_{dataset_save_tag}_merged'):
@@ -127,10 +127,10 @@ class ModelManager:
             hp_setups = self._get_hp_setups(train_processed, chosen_hp_setups)
 
         # train the model(s) and dump to .joblib file
-        model_dict_cgn, model_dict_full = {}, {}
+        core_model_dict, extended_model_dict = {}, {}
         total_iterations = len(
             self.config.final_model.experiments) * (
-                               2 if self.config.final_model.include_pretrain_merged and test is not None else 1)
+                               2 if self.config.final_model.include_pretrain_merged and extend_train is not None else 1)
 
         with utils.custom_tqdm(total=total_iterations) as pbar:
             pbar.set_description(f"[PROGRESS]: Pretraining")
@@ -142,18 +142,18 @@ class ModelManager:
                     logger.warning(f"Skipping experiment '{exp.name}':"
                                    f"hp strategy '{exp.hp_setup_name}' not computed.")
                     continue
-                model_dict_cgn.update(self._train_model(train_processed, _hp_setup, experiment=exp, pbar=pbar))
+                core_model_dict.update(self._train_model(train_processed, _hp_setup, experiment=exp, pbar=pbar))
                 pbar.update(1)
 
             # second loop for full pretrain if enabled
-            if self.config.final_model.include_pretrain_merged and test is not None:
+            if self.config.final_model.include_pretrain_merged and extend_train is not None:
                 for exp in self.config.final_model.experiments:
                     _hp_setup_full = hp_setups_merged.get(exp.hp_setup_name)
                     if _hp_setup_full is None:
                         logger.warning(f"Skipping experiment '{exp.name}' in full pretrain:"
                                        f"HP setup '{exp.hp_setup_name}' not computed.")
                         continue
-                    model_dict_full.update(
+                    extended_model_dict.update(
                         self._train_model(train_full_processed, _hp_setup_full, experiment=exp, pbar=pbar))
                     pbar.update(1)
 
@@ -163,10 +163,14 @@ class ModelManager:
 
         for _model_save_path in model_save_path_list:
             _model_save_path = utils.check_make_dir(_model_save_path, use_existing=True, verbose=False)
-            joblib.dump(model_dict_cgn, _model_save_path.joinpath(f'models_{dataset_save_tag}.joblib'))
-            if self.config.final_model.include_pretrain_merged and test is not None and model_dict_full:
-                joblib.dump(model_dict_full, _model_save_path.joinpath(f'models_{dataset_save_tag}_merged.joblib'))
-            logger.info(f"successfully dumped models to {_model_save_path}")
+            if 'singleCenter' in dataset_save_tag:
+                joblib.dump(core_model_dict, _model_save_path.joinpath(f'{dataset_save_tag}Core.joblib'))
+                if self.config.final_model.include_pretrain_merged and extend_train is not None and extended_model_dict:
+                    joblib.dump(extended_model_dict, _model_save_path.joinpath(f'{dataset_save_tag}Extended.joblib'))
+                logger.info(f"successfully dumped models to {_model_save_path}")
+            else:
+                joblib.dump(core_model_dict, _model_save_path.joinpath(f'{dataset_save_tag}.joblib'))
+                logger.info(f"successfully dumped models to {_model_save_path}")
 
     def predict(self, test: FeatureSet, model_dict_file: Path):
         """with utils.custom_tqdm(total=sum(1 for _ in utils.nested_dict_iterator(

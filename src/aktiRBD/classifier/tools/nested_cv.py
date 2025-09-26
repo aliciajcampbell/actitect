@@ -868,7 +868,7 @@ if __name__ == '__main__':
 
     # Load config
     _config = PipelineConfig.from_yaml(
-        Path('/Users/david/Desktop/py_projects/aktiRBD_private/aktiRBD/src/aktiRBD/config/pipeline_external_cv.yaml'))
+        Path('/Users/david/Desktop/py_projects/aktiRBD_private/aktiRBD/src/aktiRBD/config/pipeline_multiCenter.yaml'))
 
     # _cv_run = Path(
     #     '/Users/david/Desktop/py_projects/aktiRBD_private/results/pipeline/run_trainPooled_2025-07-04_17h29m40s')

@@ -1,6 +1,6 @@
 
-pretrained_model_dirs: ['./aktiRBD/src/aktiRBD/models/pretrained/models_cgn.joblib']
-                       #  './aktiRBD/src/aktiRBD/models/pretrained/models_cgn_merged.joblib']  # can also use run_<>/models/.. dir...
+pretrained_model_dirs: ['./aktiRBD/src/aktiRBD/models/pretrained/singleCenterCore.joblib']
+                        './aktiRBD/src/aktiRBD/models/pretrained/multiCenterCore.joblib']  # can also use run_<>/models/.. dir...
 random_state: 42
 n_jobs: -1
 log_night_eval: false
@@ -19,12 +19,6 @@ data:
   loader:
     binary_mapping:  {'HC': 0, 'PD-RBD': 0, 'PD+RBD': 1, 'iRBD': 1}
     # binary_mapping: {'HC': 0, 'iRBD': 1}
-    # binary_mapping:  {'HC': 0, 'PD-RBD': 0, 'PD+RBD': 1, 'iRBD': 1}
-    # binary_mapping:  {'HC': 0, 'PD-RBD': 0, 'PD+RBD': 1}
-    # binary_mapping:  {'PD-RBD': 0, 'PD+RBD': 1}
-    # binary_mapping:  {'HC': 0, 'PD+RBD': 1, 'iRBD': 1}
-    # binary_mapping: {'HC': 0, 'PD+RBD': 1}
-    # binary_mapping:  {'HC': 0, 'PD+RBD': 1, 'RBD': 1}
     # 'binary_mapping' defined the classification task, i.e. RBD vs HC, PD vs HC, etc.
 
     feature_dir: './features/per_night'  # relative to patient_dir
