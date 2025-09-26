@@ -49,6 +49,7 @@ class ModelManager:
                 'n_jobs': self.n_jobs}
             self._log_night_level = self.config.final_model.log_night_level
             self._output_patient_csv = self.config.final_model.output_patient_csv
+            self.extra_diagnostic_metrics = self.config.nested_cv.extra_diagnostic_metrics
 
             if any(exp.early_stopping for exp in self.config.final_model.experiments):
                 assert self.config.model.which == 'xgboost', \
@@ -63,6 +64,7 @@ class ModelManager:
             self.process_kwargs = self.n_jobs = self.rank_kwargs = self.early_stopping_options = None
             self._log_night_level = self.config.log_night_eval
             self._output_patient_csv = self.config.output_patient_csv
+            self.extra_diagnostic_metrics = self.config.extra_diagnostic_metrics
 
         self.model_setup = None
         self.current_context = None
@@ -90,12 +92,14 @@ class ModelManager:
                     ]:
                         _out_dir = utils.check_make_dir(_save_path.joinpath(_save_tag), True)
                         ev = Evaluator(
-                            _out_dir, _exp, thresholds, output_patient_csv=self._output_patient_csv, cv_mode=False)
+                            _out_dir, _exp, thresholds, output_patient_csv=self._output_patient_csv, cv_mode=False,
+                            extra_diagnostic_metrics=self.extra_diagnostic_metrics, bootstrap_ci=True)
                         ev.evaluate(train_data=None, valid_data=_valid_set, generate_night_output=self._log_night_level)
                 else:
                     _out_dir = utils.check_make_dir(_save_path, True)
                     ev = Evaluator(
-                        _out_dir, _exp, thresholds, output_patient_csv=self._output_patient_csv, cv_mode=False)
+                        _out_dir, _exp, thresholds, output_patient_csv=self._output_patient_csv, cv_mode=False,
+                        extra_diagnostic_metrics=self.extra_diagnostic_metrics, bootstrap_ci=True)
                     ev.evaluate(train_data=None, valid_data=test_processed, generate_night_output=self._log_night_level)
 
                 pbar.update(1)
@@ -323,7 +327,7 @@ class ModelManager:
         _n_hc_train_outer, _n_rbd_train_outer = np.unique(y_train, return_counts=True)[1]
         _cls_balance_outer = _n_hc_train_outer / _n_rbd_train_outer
         model_factory = ModelFactory(model_cfg.which, cls_balance=_cls_balance_outer, seed=random_state,
-            top_k_cfg=model_cfg.feature_selection.top_k_feats)
+                                     top_k_cfg=model_cfg.feature_selection.top_k_feats)
         return model_factory.build()
 
     def _get_bayes_opt_hps(self, train: FeatureSet, plot_search_history: bool = True):

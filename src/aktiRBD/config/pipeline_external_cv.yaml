@@ -10,7 +10,17 @@ model:
     n_calls: 100
     use_early_stopping: False
     verbose: True
+  dataset_weighting:  none   # one of: none | dsw | dswc, only relevant for LODO
+  #   dsw:bay_off   -> only main model (BayesOpt off)
+  #   dsw:bay_on    -> both main model and BayesOpt
+  #   dswc:bay_off  -> class-aware weights only for main model
+  #   dswc:bay_on   -> class-aware weights for both main model and BayesOpt
   feature_selection:
+
+    fair_agg:  # 'median' # only relevant for LODo: none for simply pooled ranking, else mean / median / borda for rankin per site + aggregation
+
+
+
     top_k_feats:
       tune: true           # true  → include in BayesOpt space
       low: 5 # 15 # 5
@@ -32,14 +42,32 @@ model:
 data:
   agg_level: 'night'
   processing:
-    scaler:  'robust' # 'robust' # 'minmax', 'standard', 'robust' or 'none'
+    scaler:  'robust'
+      # Available scalers (choose one):
+      #   standard        -> global standard scaler (mean/SD over pooled training data)
+      #   robust          -> global robust scaler (median/IQR)
+      #   minmax          -> global min–max scaler
+      #   none            -> no scaling
+      #
+      # Optional strategy suffixes (append after a colon):
+      #   :per_ds-macro   -> fit per-dataset scalers on training sites, then
+      #                      apply their unweighted macro-average to any unseen site
+      #   :per_ds-macro-w -> same, but macro-average weighted by the number of training
+      #                      samples per site (size-weighted)
+      #
+      # Examples:
+      #   standard                # global (current default)
+      #   standard:per_ds-macro   # per-site + unweighted macro inference
+    #   robust:per_ds-macro-w   # robust per-site + weighted macro inference
+    #   minmax:transductive     # min–max scaling fitted on the test site (sensitivity only)
     scaling_order: 'before_ranking' # 'before_ranking' or 'after_ranking'
-    use_smote: True
+    use_smote: True  # 'per_ds' # bool or str='per_ds' for per dataset mode in LODO
 
   loader:
     binary_mapping: {'HC': 0, 'PD-RBD': 0,  'iRBD': 1, 'PD+RBD': 1}
+    # binary_mapping: {'HC': 0,   'iRBD': 1}
     rebalance_datasets: # for LODO only, to mitigate dataset biases
-        method: 'cap_to_second_largest'
+        method: 'none'
         # none: keep original | cap_to_second_largest: cut largest to 2nd largest if ≥ ratio |
         # min: cut all to smallest | equalize_to_median: cut all to median | cap_to_k: cap each at k |
         # proportional_to_quota: downsample to quotas | weights_only: keep all, use weights
@@ -134,7 +162,19 @@ nested_cv:
     name: 'nested_cv'
     hp_setup_name:
     early_stopping:
-    calibration:  'sigmoid' # 'sigmoid'
+    calibration:  'sigmoid' # 'sigmoid', 'isotonic' or leave emtpy, add postfix :unSMOTEd to calib on original prevalence (seems to drop AAR/OXF BA, increase CGNTrain -> ), dsw/dswc seems to improve BA
+    # calibration string options:
+    #   ''                → no calibration
+    #   'sigmoid'         → Platt scaling on SMOTEd train fold
+    #   'isotonic'        → isotonic calibration on SMOTEd train fold
+    #   Postfix modifiers (can be combined):
+    #     ':unsmoted'     → calibrate on original (unSMOTEd) subset only
+    #     ':dsw'          → dataset-equal weights during calibration
+    #     ':dswc'         → dataset×class-equal weights during calibration
+    # Examples:
+    #   'sigmoid:unsmoted'              (original-only, unweighted)
+    #   'sigmoid:unsmoted:dsw'          (original-only, site-balanced)
+    #   'isotonic:dswc'                 (SMOTEd data, site×class-balanced)
     threshold:  'default'  # threshold options: default, roc_dist, pr_dist, pr_f1, macro_ba, macro_ba_weighted, roc_dist_per_dataset_mean, roc_dist_per_dataset_median, pr_dist_per_dataset_mean, pr_dist_per_dataset_median, pr_f1_per_dataset_mean, pr_f1_per_dataset_median, fixed:<float>
     patient_aggregation: 'ensemble_major'
 
@@ -144,7 +184,7 @@ nested_cv:
 
 
 final_model:
-    skip_pretrain: True
+    skip_pretrain: False
     n_jobs: -1
     bayes_cv:
       n_splits: 5

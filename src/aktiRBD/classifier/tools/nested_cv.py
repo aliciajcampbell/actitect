@@ -378,7 +378,8 @@ class NestedCVBase(ABC):
                     _out_dir = utils.check_make_dir(save_path_fold.joinpath(_save_tag), True)
                     ev = Evaluator(_out_dir, self.config.nested_cv.default_experiment, thresholds,
                                    cv_config=self.config.nested_cv, cv_mode=True,
-                                   bootstrap_ci=isinstance(self, LODONestedCV))
+                                   bootstrap_ci=isinstance(self, LODONestedCV),
+                                   extra_diagnostic_metrics=bool(self.config.nested_cv.extra_diagnostic_metrics))
                     ev.evaluate(
                         train_outer_top_k, _valid_set, generate_night_output=self.config.nested_cv.log_night_eval)
 

@@ -80,7 +80,7 @@ class DataLoader:
     def __str__(self):
         return f"DataLoader(n_rbd={self.num_total_rbd}, n_hc={self.num_total_hc})"
 
-    def get_train_test_data(self, agg_level: str, agg_with_numba: bool = True):
+    def get_train_test_data(self, agg_level: str = 'night', agg_with_numba: bool = True):
 
         local_feat_df = self._create_local_feature_dataframe()
         x, y, y_str, feat_map, train_index_mask, test_index_mask = None, None, None, None, None, None

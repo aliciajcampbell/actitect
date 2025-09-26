@@ -25,7 +25,7 @@ class Evaluator:
 
     def __init__(self, save_path: Path, experiment: ExperimentConfig, thresholds: dict,
                  cv_mode: bool, output_patient_csv: bool = False, cv_config: NestedCVConfig = None, *,
-                 bootstrap_ci: bool = False):
+                 bootstrap_ci: bool = False, extra_diagnostic_metrics: bool = False):
 
         self.save_path = save_path
         self.experiment = experiment
@@ -34,7 +34,7 @@ class Evaluator:
         self.bootstrap_ci = bootstrap_ci
         self.cv_config = cv_config
         self.output_patient_csv = False if self.cv_mode else output_patient_csv
-        self.extra_diagnostic_metrics = bool(getattr(self.cv_config, 'extra_diagnostic_metrics', False))
+        self.extra_diagnostic_metrics = extra_diagnostic_metrics
         if cv_mode:
             assert cv_config, f"if 'cv_mode' is True, 'cv_config' must be passed as 'NestedCVConfig' instance."
 
@@ -125,8 +125,8 @@ class Evaluator:
         _ = eval_roc_and_pr_curves(per_patient_df['ground_truth'], per_patient_df['mean_prob_per_night'],
                                    lvl='patient', mode='eval', eval_params=_eval_params)
 
-        # if in CV/LODO and diagnostics are enabled, write fold-level diagnostics
-        if self.cv_mode and bool(getattr(self.cv_config, "extra_diagnostic_metrics", False)):
+        # if diagnostics are enabled, compute and write them
+        if self.extra_diagnostic_metrics:
             diag = self._compute_diagnostic_metrics(per_patient_df, thr=patient_threshold.value, agg_col=_key)
             utils.dump_to_json(diag, self.save_path.joinpath('patient_prob_diagnostic.json'))
             logger.info(f"Wrote patient diagnostics to {self.save_path.joinpath('patient_prob_summary.json')}")

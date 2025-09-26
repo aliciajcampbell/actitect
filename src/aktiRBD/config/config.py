@@ -55,9 +55,16 @@ class BaseConfig:
         return cls(**init_kwargs)
 
     @classmethod
-    def from_yaml(cls, yaml_path: Path = None) -> 'BaseConfig':
+    def from_yaml(cls, yaml_path: Path = None, which: str = 'internal_cv') -> 'BaseConfig':
         if not yaml_path:
-            yaml_path = Path(__file__).parent.joinpath('pipeline.yaml')
+            if which == 'internal_cv':
+                yaml_path = Path(__file__).parent.joinpath('pipeline_internal_cv.yaml')
+            elif which == 'external_cv':
+                yaml_path = Path(__file__).parent.joinpath('pipeline_external_cv.yaml')
+            elif which == 'external_test':
+                yaml_path = Path(__file__).parent.joinpath('external_test.yaml')
+            else:
+                raise ValueError(f'Unknown value for {which}: {yaml_path}')
 
         with yaml_path.open('r') as file:
             config_dict = yaml.safe_load(file)
@@ -232,6 +239,7 @@ class ExternalTestConfig(BaseConfig):
     data: DataConfig
     log_night_eval: bool
     output_patient_csv: bool
+    extra_diagnostic_metrics: Optional[bool] = False
 
 
 @dataclass

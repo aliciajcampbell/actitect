@@ -720,6 +720,22 @@ class FeatureSet:
             for idx, name in enumerate(self.feat_map)
         }
 
+    def split_by_dataset(self) -> dict:
+        """ Split a FeatureSet into per-dataset FeatureSets.
+        Returns an ordered dict {<dataset_id str>: FeatureSet} preserving all fields."""
+        if self.dataset is None:
+            raise ValueError("FeatureSet.dataset is None — nothing to split on.")
+        ds = np.asarray(self.dataset)
+        uniq = [str(u) for u in np.unique(ds)]  # stable, sorted
+
+        out = {}
+        for u in uniq:
+            idx = np.where(ds == u)[0]
+            fs_u = self.select_samples(idx)  # preserves feat_map, prob, y_str, smote_mask, feat_rank, process_params
+            # Keep dataset vector restricted to this site (select_samples already did this)
+            out[u] = fs_u
+        return out
+
 
 @dataclass
 class Fold:
