@@ -36,10 +36,10 @@ def _run_setup():
         # Additional arguments for options within modes
         parser.add_argument('-r', '--root_dir', type=str, metavar='DIR',
                             default=str(utils.get_experiment_root()),
-                            help="The root directory containing 'data/' and 'aktiRBD/'.")
+                            help="The root directory containing 'data/' and 'ActiTect/'.")
 
-        parser.add_argument('-c', '--config_file', type=str, metavar='FILE',
-                            default='./aktiRBD/src/aktiRBD/config/external_test.yaml',  # rel. to root dir
+        parser.add_argument('-c', '--config_file', type=str, metavar='FILE',  # rel. to root_dir
+                            default='./ActiTect/libs/actitect-rbdisco/src/actitect/rbdisco/configs/external_test.yaml',
                             help='full path (rel. to root) of the config .yaml file defining preprocessing settings.')
 
         parser.add_argument('-d', '--processed_data_dir', type=str, nargs='+', metavar='DIR',
@@ -76,9 +76,9 @@ def _run_setup():
         _args.meta_file = _args.root_dir.joinpath(_args.meta_file)
 
         assert (_args.root_dir.is_dir() and _args.root_dir.joinpath('data').is_dir() and
-                _args.root_dir.joinpath('aktiRBD').is_dir()), \
+                _args.root_dir.joinpath('ActiTect').is_dir()), \
             (f"'--root_dir' ('-r') ({_args.root_dir}) is not a dir "
-             f"or does not contain sub-dirs './data' and './aktiRBD'")
+             f"or does not contain sub-dirs './data' and './ActiTect'")
         assert _args.config_file.is_file(), \
             f"'--config_file' (-'c') is not a file. ({_args.config_file})"
 

@@ -70,7 +70,7 @@ def setup_logging(config_path=Path(__file__).parents[1].joinpath('config/logging
             check_make_dir(_unique_log_path.parent, use_existing=True)
             _log_config['handlers']['file'].update({'filename': _unique_log_path})
         else:  # disable file logging and only print console logging
-            _log_config['loggers']['aktiRBD'].update({'handlers': ['console']})
+            _log_config['loggers']['actitect'].update({'handlers': ['console']})
             _log_config['root'].update({'handlers': ['console']})
             _ = _log_config['handlers'].pop('file')
         logging.config.dictConfig(_log_config)

@@ -713,7 +713,7 @@ class NestedCVBase(ABC):
     def _handle_parallel_logging(self):
         self.is_parallel = self.n_jobs != 1
         loggers = [logging.getLogger(name) for name in logging.root.manager.loggerDict
-                   if 'aktiRBD' in name or '__main__' in name]
+                   if 'actitect' in name or '__main__' in name]
 
         previous_levels = {_lggr: logger.level for _lggr in loggers}
 
@@ -861,26 +861,3 @@ class LODONestedCV(NestedCVBase):
             out_path = summaries_dir / f"lodo_eval_summary_{variant_key}.json"
             with open(out_path, "w") as f:
                 json.dump(metric_summary, f, indent=2)
-
-
-if __name__ == '__main__':
-    utils.setup_logging()
-
-    # Load config
-    _config = PipelineConfig.from_yaml(
-        Path('/actitect/config/pipeline_multiCenter.yaml'))
-
-    # _cv_run = Path(
-    #     '/Users/david/Desktop/py_projects/aktiRBD_private/results/pipeline/run_trainPooled_2025-07-04_17h29m40s')
-    # _cv_run = Path(
-    #     '/Users/david/Desktop/py_projects/aktiRBD_private/results/pipeline/run_trainPooled_2025-07-08_11h46m39s')
-    # _cv_run = Path(
-    #          '/Users/david/Desktop/py_projects/aktiRBD_private/results/pipeline/run_trainPooled_2025-07-08_13h02m35s')
-    # _cv_run = Path(
-    #         '/Users/david/Desktop/py_projects/aktiRBD_private/results/pipeline/run_trainPooled_2025-07-09_15h03m44s')
-    _cv_run = Path(
-        '/Users/david/Desktop/py_projects/aktiRBD_private/results/pipeline/run_trainPooled_2025-09-15_15h36m11s')
-
-    cv = LODONestedCV(config=_config, save_path=_cv_run)
-    # cv = KFoldNestedCV(config=_config, save_path=_cv_run)
-    cv.eval()

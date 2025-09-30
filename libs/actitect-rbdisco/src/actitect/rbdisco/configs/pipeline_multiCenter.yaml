@@ -217,5 +217,5 @@ final_model:
     calibration_cv:  # cv used for calibrating the model (if specified)
       n_splits: 5
       shuffle: True
-    overwrite_final_repo_models: True  # if True, it will also save the models at aktiRBD.models.pretrained
+    overwrite_final_repo_models: True  # if True, it will also save the models at rbdisco/models/pretrained
 

@@ -28,7 +28,7 @@ handlers:
     mode: a  # append mode
 
 loggers:
-  aktiRBD:
+  actitect:
     level: INFO
     handlers: [console, file]
     propagate: False

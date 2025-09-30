@@ -75,7 +75,7 @@ def _process_dataset(args: argparse.Namespace, processing_kwargs: dict, feature_
 
 
 def _parse_args():
-    """ Parses command-line arguments for preprocessing. Use 'aktiRBD_preprocess --help' for details."""
+    """ Parses command-line arguments for preprocessing. Use 'ActiTect-process --help' for details."""
     parser = argparse.ArgumentParser(
         prog='ActiTect-process',
         description='Preprocess actigraphy data by standardizing, segmenting sleep windows,'
@@ -85,13 +85,13 @@ def _parse_args():
     # file organization arguments
     parser.add_argument(
         '-r', '--root_dir', type=str,
-        default=str(utils.get_experiment_root()),  # default points to aktiRBD_experiment
-        help="The root directory containing 'data/' and 'aktiRBD/'."
+        default=str(utils.get_experiment_root()),  # default points to ActiTect_experiment
+        help="The root directory containing 'data/' and 'ActiTect/'."
     )
 
     parser.add_argument(
         '-c', '--config_file', type=str,
-        default='./aktiRBD/src/aktiRBD/config/preprocessing.yaml',
+        default='./ActiTect/libs/actitect/src/actitect/config/preprocessing.yaml',
         help='Location of the config .yaml file that defines preprocessing settings.'
     )
 

@@ -610,16 +610,6 @@ class FeatureSet:
             f"Applied per-dataset SMOTE: {num_new_total} synthetic samples added "
             f"({site_str})")
 
-    '''def _get_feature_ranking(self, rank_kwargs: dict):
-        """ Applies feature ranking to the FeatureSet based on the specified ranking method.
-        Parameters:
-            :param rank_kwargs (Dict): Arguments for the ranking method.
-        Returns:
-                Dict: Feature rankings (maps each feature to its rank)."""
-        from aktiRBD.features.ranking import FeatureRanker
-        ranker = FeatureRanker(**rank_kwargs)
-        return ranker.fetch_or_compute(data=self)  # fetch or compute feature ranks'''
-
     def _get_feature_ranking(self, rank_kwargs: dict):
         """
         If rank_kwargs['fair_agg'] is set and there are multiple datasets in this FeatureSet,
