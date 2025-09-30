@@ -4,18 +4,21 @@ import logging
 from pathlib import Path
 from argparse import Namespace
 
+from typing import Optional, TYPE_CHECKING
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pyarrow
 import pyarrow.parquet as parquet
 
-import actitect.processing as pr
-import actitect.utils as utils
-from actitect.actimeter import ActimeterFactory
-from actitect.actimeter.basedevice import ResolveNwSleepParams
-from actitect.features import CalcLocalMoveFeatures, CalcGlobalMoveFeatures
-from actitect.utils.visualization import draw_actigraphy_data
+from .utils import extract_segments
+from .movements import segment_nocturnal_movements
+from .. import utils
+from ..features import CalcLocalMoveFeatures, CalcGlobalMoveFeatures
+from ..vis import draw_actigraphy_data
+if TYPE_CHECKING:
+    from ..actimeter.basedevice import ResolveNwSleepParams
 
 MIN_LOCAL_SAMPLE_LENGTH_SECONDS = 0.5
 MAX_LOCAL_SAMPLE_LENGTH_SECONDS = 50
@@ -152,6 +155,7 @@ class FileProcessor:
             return json.load(f)
 
     def _load_or_process_data(self, redo_processing: bool):
+        from ..actimeter import ActimeterFactory
         if self.has_been_processed and not redo_processing:  # file exist and we do not want to force re-processing
             processed_df = parquet.read_table(self.parquet_path).to_pandas()
             with open(self.recording_save_dir.joinpath(f"info-{self.saving_suffix}.json"), 'r') as f:
@@ -164,7 +168,7 @@ class FileProcessor:
                                f"re-run processing due to operational args. Data will be overwritten "
                                f"if 'save_processed_data' is True ({self.save_processed_data}).")
             if self.ax6_legacy_mode:  # factory handles kwargs but this will mute the warning for other devices
-                actimeter = ActimeterFactory(self.acti_file_path, self.saving_suffix,  legacy_mode=self.ax6_legacy_mode)
+                actimeter = ActimeterFactory(self.acti_file_path, self.saving_suffix, legacy_mode=self.ax6_legacy_mode)
             else:
                 actimeter = ActimeterFactory(self.acti_file_path, self.saving_suffix)
             utils.check_make_dir(self.recording_save_dir, use_existing=True)
@@ -179,19 +183,21 @@ class FileProcessor:
 
         return processed_df, info
 
-    def _segment_nocturnal_movements(self, processed_df: pd.DataFrame, params: ResolveNwSleepParams = None):
+    def _segment_nocturnal_movements(self, processed_df: pd.DataFrame, params: Optional['ResolveNwSleepParams'] = None):
+        from ..actimeter.basedevice import ResolveNwSleepParams
 
         params = params if params else ResolveNwSleepParams()
 
         # get non-wear segments: (start, end, length)
-        non_wears = pr.extract_segments(processed_df, column='wear', condition=False, add_during_night_indicator=True,
-                                        night_start=params.night_start, night_end=params.night_end,
-                                        during_night_h_thres=.1)
+        non_wears = extract_segments(
+            processed_df, column='wear', condition=False, add_during_night_indicator=True,
+            night_start=params.night_start, night_end=params.night_end, during_night_h_thres=.1)
 
         # get sptw segments: (start, end, length)
-        sptws = pr.extract_segments(processed_df, column='sptw', condition=True, add_during_night_indicator=True,
-                                    night_start=params.night_start, night_end=params.night_end,
-                                    during_night_h_thres=params.night_sptw_duration_during_night_h)
+        sptws = extract_segments(
+            processed_df, column='sptw', condition=True, add_during_night_indicator=True,
+            night_start=params.night_start, night_end=params.night_end,
+            during_night_h_thres=params.night_sptw_duration_during_night_h)
 
         # select only sptws that correspond to nights: (i.e. begin/end in typical night window and long enough)
         sptws['selected'] = sptws.apply(
@@ -202,7 +208,7 @@ class FileProcessor:
         logger.info(f"({self.saving_suffix}) found {selected_sptws.shape[0]} full nights of sleep in data.")
 
         # mask the movement bouts:
-        move_segment_mask, move_segment_ids, move_stats = pr.segment_nocturnal_movements(processed_df, selected_sptws)
+        move_segment_mask, move_segment_ids, move_stats = segment_nocturnal_movements(processed_df, selected_sptws)
 
         # update some infos about selected nights and number of movements:
         logger.info(
@@ -284,7 +290,7 @@ class FileProcessor:
     def _calc_global_features(self, _night_df: pd.DataFrame, _night_sptw: pd.DataFrame, _night_idx: int):
 
         # get a representation as start, end, length where each row corresponds to one movement
-        night_move_segments = pr.extract_segments(_night_df, 'movement', True, time_unit='s')
+        night_move_segments = extract_segments(_night_df, 'movement', True, time_unit='s')
 
         # apply a duration filter if specified:
         if isinstance(self.feat_kwargs['filter_move_durations'], tuple):
@@ -329,7 +335,7 @@ class FileProcessor:
                     <= _move_bout_df.shape[0]
                     <= int(MAX_LOCAL_SAMPLE_LENGTH_SECONDS * sample_rate)):
                 logger.debug(f"timeseries too short/long: {_relevant_idx} "
-                    f"({(_move_bout_df.index[-1] - _move_bout_df.index[0]).total_seconds():.3f}s)")
+                             f"({(_move_bout_df.index[-1] - _move_bout_df.index[0]).total_seconds():.3f}s)")
                 _local_feats = {_feat_name: np.NaN for _feat_name in _feature_names}
             else:  # calculate the movement features of each episode
                 _feature_generator = CalcLocalMoveFeatures(self.feat_kwargs['mode'], sample_rate)
@@ -380,7 +386,7 @@ class FileProcessor:
         else:  # both defined: warn if they differ and use data_fs
             if header_fs != data_fs:
                 logger.warning(f"(io: {self.saving_suffix}) Device header sample rate ({header_fs} Hz) "
-                    f"differs from data sample rate ({data_fs} Hz)."
+                               f"differs from data sample rate ({data_fs} Hz)."
                                f"Consider activating resampling in the processing pipeline.")
             return data_fs
 
@@ -402,6 +408,7 @@ class FileProcessor:
 
     def _plot_data(self, processed_df: pd.DataFrame):
         """Plots raw and processed data, saving the plots to disk."""
+        from ..actimeter import ActimeterFactory
 
         def _save_plot(fig, path, data_type):
             """Helper function to save a plot and log status."""

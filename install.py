@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """ Installation helper script to a) ensure non-python dependency OpenMP is available and b) install the Python package.
-Optionally install in development mode using python install.py --dev"""
+If only the core actigraphy analysis is needed, add --core-only to skip the RBD prediction part.
+Optionally install in development mode using: python install.py --dev
+"""
 
 import argparse
 import ctypes
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -16,7 +19,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 def _parse_args():
     parser = argparse.ArgumentParser(description="Install the package and its dependencies.")
-    parser.add_argument("--dev", action="store_true", help="Install in development mode.")
+    parser.add_argument("-d", "--dev", action="store_true", help="Install in development mode.")
+    parser.add_argument("-c", "--core-only", action="store_true",
+                        help="Install only the core (skip RBDisco/OpenMP checks).")
     return parser.parse_args()
 
 
@@ -24,19 +29,16 @@ def _ensure_openmp():
     """ Ensure that an OpenMP runtime is available. If not, attempt to install it. """
 
     def __openmp_is_available():
-        """Check for common OpenMP runtime libraries."""
         if sys.platform.startswith("darwin"):
-            # macOS: typically uses libomp
             lib_names = [
                 "libomp.dylib",
                 "/opt/homebrew/opt/libomp/lib/libomp.dylib",
-                "/usr/local/lib/libomp.dylib"
+                "/usr/local/opt/libomp/lib/libomp.dylib",
+                "/usr/local/lib/libomp.dylib",
             ]
         elif sys.platform.startswith("linux"):
-            # Linux: usually uses GNU OpenMP (libgomp)
             lib_names = ["libgomp.so.1", "libgomp.so"]
         elif sys.platform.startswith("win"):
-            # Windows: OpenMP is usually provided by the MSVC runtime.
             lib_names = ["vcomp140.dll", "vcomp140_1.dll"]
         else:
             lib_names = []
@@ -51,17 +53,28 @@ def _ensure_openmp():
         return False
 
     def __install_openmp():
-        """Install the OpenMP runtime using the appropriate system package manager."""
         if sys.platform.startswith("darwin"):
-            logging.info("Detected macOS. Installing libomp via Homebrew...")
+            logging.info("Detected macOS. Will install libomp via Homebrew...")
+            if shutil.which("brew") is None:
+                logging.error("Homebrew not found. Please install Homebrew first and then run:\n"
+                              "  brew install libomp\n"
+                              "Alternative (conda): conda install -c conda-forge libomp")
+                sys.exit(1)
             subprocess.run(["brew", "install", "libomp"], check=True)
         elif sys.platform.startswith("linux"):
-            logging.info("Detected Linux. Installing libgomp via apt-get...")
-            subprocess.run(["sudo", "apt-get", "install", "-y", "libgomp1"], check=True)
+            logging.info("Detected Linux. Installing libgomp via apt-get (if available)...")
+            if shutil.which("apt-get"):
+                subprocess.run(["sudo", "apt-get", "update", "-y"], check=True)
+                subprocess.run(["sudo", "apt-get", "install", "-y", "libgomp1"], check=True)
+            else:
+                logging.error("apt-get not found. Please install your distro's GNU OpenMP runtime (e.g., libgomp) "
+                              "using the appropriate package manager, then re-run this script.")
+                sys.exit(1)
         elif sys.platform.startswith("win"):
             logging.info("Detected Windows. Please ensure you have the latest Visual C++ Build Tools installed.")
         else:
             logging.error("Unsupported OS. Please install an OpenMP runtime manually.")
+            sys.exit(1)
 
     logging.info("Checking for OpenMP runtime...")
     if __openmp_is_available():
@@ -75,7 +88,7 @@ def _ensure_openmp():
             logging.error("Please install OpenMP manually and re-run this script.")
             sys.exit(1)
 
-        if not __openmp_is_available():  # re-ensure installation succeeded
+        if not __openmp_is_available():
             logging.error("OpenMP runtime installation failed or is still unavailable.")
             sys.exit(1)
         else:
@@ -83,44 +96,88 @@ def _ensure_openmp():
 
 
 def _set_experiment_root():
+    """Experiment root which will be used for default data paths."""
     _exp_root = Path(__file__).parents[1].resolve()
-    with open(Path(__file__).parent.joinpath('src/aktiRBD/config/experiment_root.json'), 'w') as f:
-        json.dump({"EXPERIMENT_ROOT": str(_exp_root)}, f, indent=4)
+    cfg_dir = Path(__file__).parent.joinpath('libs/actitect/src/actitect/config')
+    local_root_json = cfg_dir.joinpath('experiment_root.local.json')  # untracked local sidecar
+    try:
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        with open(local_root_json, 'w') as f:
+            json.dump({'EXPERIMENT_ROOT': str(_exp_root)}, f, indent=4)
+        logging.info('Wrote experiment root to %s', local_root_json)
+        return
+    except Exception:
+        logging.warning('Could not write experiment_root.local.json. Skipping.')
+
+
+def _pip_install(path: str, dev: bool):
+    cmd = [sys.executable, '-m', 'pip', 'install']  # use current interpreter
+    if dev:
+        cmd += ['-e', path]
+    else:
+        cmd += [path]
+    logging.info("Installing: %s", " ".join(cmd))
+    subprocess.run(cmd, check=True)
+
+
+def _prepare_pkg_docs():
+    """Copy main README and license to each libs root dir. PEP 517 build regulations."""
+    repo = Path(__file__).resolve().parent
+    src_readme = repo / "README.md"
+    src_license = repo / "LICENSE"
+    pkg_dirs = [repo / "libs" / "actitect", repo / "libs" / "actitect-rbdisco"]
+    for pkg in pkg_dirs:
+        if pkg.exists():
+            if src_readme.exists():
+                shutil.copy2(src_readme, pkg / "README.md")
+            if src_license.exists():
+                shutil.copy2(src_license, pkg / "LICENSE")
 
 
 def main():
     args = _parse_args()
 
-    # Ensure we're in the right directory by checking for pyproject.toml.
-    if not os.path.isfile("pyproject.toml"):
-        logging.error("pyproject.toml not found. Please run this script from the project root directory.")
+    # Accept root or monorepo pyproject presence
+    if not (os.path.isfile('pyproject.toml') or os.path.isfile('libs/actitect/pyproject.toml')):
+        logging.error('pyproject.toml not found. Run this from the repository root.')
         sys.exit(1)
 
-    # 1: XGBoost depends on OpenMP runtime for multiprocessing, ensure it's available
-    _ensure_openmp()
+    # 1: If installing with RBDisco (default), ensure OpenMP is available
+    if not args.core_only:
+        _ensure_openmp()
+    else:
+        logging.info('--core-only specified: skipping OpenMP checks (RBDisco not installed).')
 
     # 2: Dynamically set the experiment root path
     _set_experiment_root()
 
-    #  3: Install the Python package using pip.
-    pip_command = ["pip", "install", "."]
-    if args.dev:
-        pip_command = ["pip", "install", "-e", ".[dev]"]
+    # 3: ensure README/LICENCE present for isolated builds
+    _prepare_pkg_docs()
 
+    # 4: Install the Python package(s) using pip.
     try:
-        logging.info("Installing Python package using pip command: %s", " ".join(pip_command))
-        subprocess.run(pip_command, check=True)
-
-        logging.info("Verifying package installation...")
-        try:
-            subprocess.run(["python", "-c", "import aktiRBD", "from xgboost import XGBClassifier"], check=True)
-            logging.info("Installation successful!")
-        except subprocess.CalledProcessError:
-            logging.error("Quality-control check failed: aktiRBD could not be imported.")
-            sys.exit(1)
+        if args.core_only:  # core only: install the core actigraphy dist
+            _pip_install('libs/actitect', args.dev)
+        else:  # with RBDisco (default): install core, then plugin
+            _pip_install('libs/actitect', args.dev)
+            _pip_install('libs/actitect-rbdisco', args.dev)
 
     except subprocess.CalledProcessError as e:
         logging.error("Error during pip installation: %s", e)
+        sys.exit(1)
+
+    # 5: Post-install verification (separate try/except)
+    try:
+        if args.core_only:
+            subprocess.run([sys.executable, "-c", "import actitect"], check=True)
+        else:
+            subprocess.run(
+                [sys.executable, "-c", "import actitect, actitect.rbdisco; from xgboost import XGBClassifier"],
+                check=True
+            )
+        logging.info("Installation successful!")
+    except subprocess.CalledProcessError:
+        logging.error("Quality-control check failed: unable to import expected modules.")
         sys.exit(1)
 
 

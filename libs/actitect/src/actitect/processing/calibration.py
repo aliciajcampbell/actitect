@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 
-from actitect.processing.utils import mmap_like, mmap2df, copy2mmap
+from ..processing.utils import mmap_like, mmap2df, copy2mmap
 
 __all__ = ['van_hees_sphere_calibration']
 

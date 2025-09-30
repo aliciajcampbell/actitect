@@ -1,3 +1,8 @@
 from .factory import ActimeterFactory, SUPPORTED_FILETYPES
-from actitect.actimeter.devices.axivity_ax6 import AxivityAx6
-from actitect.actimeter.devices.geneactiv import GENEActiv
+
+from .devices.axivity_ax6 import AxivityAx6
+from .devices.actigraph import ActiGraph
+from .devices.geneactiv import GENEActiv
+from .devices.generic import GenericCSV
+
+__all__ = ['ActimeterFactory', 'AxivityAx6', 'GENEActiv', 'ActiGraph', 'GENEActiv', 'GenericCSV', 'SUPPORTED_FILETYPES']

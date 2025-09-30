@@ -1,17 +1,15 @@
 import logging
+import warnings
 from abc import ABC, abstractmethod
 
 import numpy as np
+from scipy.optimize.linesearch import LineSearchWarning
 from sklearn.model_selection import ParameterGrid, ParameterSampler
 from skopt import gp_minimize
 
-from actitect.classifier.models import ModelSetup
-from actitect.classifier.tools.cross_validation import perform_stratified_group_cv
 from actitect.utils import custom_tqdm
-
-import warnings
-import logging
-from scipy.optimize.linesearch import LineSearchWarning
+from .cross_validation import perform_stratified_group_cv
+from ..models import ModelSetup
 
 logger = logging.getLogger(__name__)
 

@@ -11,8 +11,8 @@ from typing import Optional, Union
 import numpy as np
 import pandas as pd
 
-from actitect.actimeter.basedevice import BaseDevice
-from actitect import utils
+from ..basedevice import BaseDevice
+from ... import utils
 
 __all__ = ['AxivityAx6']
 

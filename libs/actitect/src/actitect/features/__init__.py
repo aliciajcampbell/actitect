@@ -1,2 +1,4 @@
-from .features import *
-from .ranking import *
+from .features import CalcLocalMoveFeatures, CalcGlobalMoveFeatures
+
+__all__ = ['CalcLocalMoveFeatures', 'CalcGlobalMoveFeatures']
+

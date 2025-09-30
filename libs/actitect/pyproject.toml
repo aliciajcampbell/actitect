@@ -3,13 +3,16 @@ requires = ["setuptools>=64.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "aktiRBD"
-version = "0.2.1"
-description = "none"
+name = "actitect"
+version = "0.3.1"
+description = "Python toolkit for general purpose actigraphy analysis."
 readme = "README.md"
 requires-python = "==3.9.*"
 authors = [
   { name = "David Bertram", email = "dbertram@uni-koeln.de" }
+]
+maintainers = [
+     { name = "David Bertram", email = "dbertram@uni-koeln.de" }
 ]
 license = { file = "LICENSE" }
 classifiers = [
@@ -33,19 +36,12 @@ dependencies = [
   "joblib==1.2.0",  # parallelization and model saving
   "numba==0.59.0",  # speed-up feature aggregation
 
-  # ml
-  "scikit_learn==1.3.0",
-  "scikit_optimize==0.10.1",  # bayesian optimization
-  "imbalanced_learn==0.12.0",  # smote
-  "mrmr_selection==0.2.8",  # feature selection
-  "umap_learn==0.5.5",  # feature space projections
-  "xgboost==2.0.3",
-  "shap==0.45.1",  # xgb importances
-
   # time series
   "nolds==0.5.2",  # non-linear dynamics features
   "pyhrv==0.4.1",   # poincare features -> triggers Spectrum issues on windows
   "biosppy>2.0.0,<2.2.3",  # depedency of pyhrv, with 2.2.3 peakutils missing
+  "scikit_learn==1.3.0", # is dependendy of biosppy
+  "scikit_optimize==0.10.1",  # bayesian optimization (rbdisco plugin), but we need 'Dimnesion' for JSONEncoder in utils
 
   # i/o
   "openpyxl==3.1.2",  # reading from excel files
@@ -59,14 +55,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-  "pytest==8.3.4",
-  "setuptools>=64.0",
-]
+dev = ["pytest==8.3.4", "setuptools>=64.0"]
+# let users do `pip install "actitect[rbdisco]"`
+rbdisco = ["actitect-rbdisco>=0.1"]
 
 [project.scripts]
-aktiRBD-preprocess = "aktiRBD.scripts.preprocess_dataset:main"
-aktiRBD-analysis   = "aktiRBD.scripts.run_pipeline:main"
+actitect-process = "actitect.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -75,7 +69,7 @@ package-dir = {"" = "src"}
 find = { where = ["src"] }
 
 [tool.setuptools.package-data]
-"aktiRBD" = ["config/*.yaml", "config/*.json", "models/**/*.joblib"]
+"acitect" = ["config/*.yaml", "config/*.json"]
 
 [project.urls]
 Repository = "todo"

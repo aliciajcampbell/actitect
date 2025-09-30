@@ -9,11 +9,11 @@ from joblib import Parallel, delayed
 from sklearn import metrics, model_selection
 from sklearn.utils.validation import has_fit_parameter
 
-
-from actitect.classifier.tools.classification_threshold import get_operating_point, classify_with_threshold
 from actitect import utils
+from ..processing.classification_threshold import get_operating_point, classify_with_threshold
 
-__all__ = ['perform_stratified_group_cv', 'perform_loocv']
+
+__all__ = ['perform_stratified_group_cv']
 logger = logging.getLogger(__name__)
 
 
@@ -343,6 +343,7 @@ def perform_loocv(
         use_early_stopping: bool,
         verbose: bool = True,
 ):
+    raise DeprecationWarning()
     train_ids = np.unique(id_map_train)
     y_true, y_pred, y_prob = [], [], []
 

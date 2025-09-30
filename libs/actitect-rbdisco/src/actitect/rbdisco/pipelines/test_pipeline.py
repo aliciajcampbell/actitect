@@ -2,9 +2,8 @@ import logging
 from pathlib import Path
 
 from actitect import utils
-from actitect.classifier.pipelines import BasePipeline
-from actitect.classifier.tools import ModelManager
-from actitect.classifier.tools.feature_set import FeatureSet
+from .base_pipeline import BasePipeline
+from ..core import FeatureSet, ModelManager
 
 logger = logging.getLogger(__name__)
 

@@ -9,8 +9,9 @@ from numba import jit
 from sklearn.utils.class_weight import compute_class_weight
 
 from actitect import utils
-from actitect.classifier.tools.feature_set import FeatureSet
 from actitect.config import RebalanceDatasetsConfig
+from .feature_set import FeatureSet
+
 
 __all__ = ['DataLoader']
 

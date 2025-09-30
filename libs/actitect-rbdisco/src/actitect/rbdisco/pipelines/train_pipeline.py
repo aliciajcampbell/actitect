@@ -1,11 +1,9 @@
 import logging
 
 from actitect import utils
-from actitect.classifier.pipelines import BasePipeline
-from actitect.classifier.tools import ModelManager
-# from aktiRBD.classifier.tools.nested_cv_legacy import NestedCV  # todo: use refactored Abstract class!
-from actitect.classifier.tools import KFoldNestedCV
-from actitect.classifier.tools.feature_set import FeatureSet
+from .base_pipeline import BasePipeline
+from ..core import FeatureSet, ModelManager
+from ..blocks import KFoldNestedCV
 
 logger = logging.getLogger(__name__)
 

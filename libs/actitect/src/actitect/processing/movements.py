@@ -4,7 +4,7 @@ from contextlib import contextmanager
 import numpy as np
 import pandas as pd
 
-from actitect.utils import df_astype_inplace
+from ..utils import df_astype_inplace
 
 __all__ = ['segment_nocturnal_movements']
 

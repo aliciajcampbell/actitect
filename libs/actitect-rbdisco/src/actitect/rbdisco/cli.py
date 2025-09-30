@@ -2,12 +2,12 @@ import argparse
 import datetime
 import logging
 import sys
+from importlib.resources import files
 from pathlib import Path
 
-from actitect import __file__ as _aktirbd_root_file
 from actitect import utils
-from actitect.classifier.pipelines import TrainPipeline, TestPipeline, PooledTrainPipeline
 from actitect.config import PipelineConfig, ExternalTestConfig
+from .pipelines import TrainPipeline, TestPipeline, PooledTrainPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ def _run_setup():
 
     def __parse_args():
         parser = argparse.ArgumentParser(
-            prog='aktiRBD',
+            prog='RBDisco',
             description='Entry point to perform RBD analysis from actigraphy data. Call --help or -h for details.',
             formatter_class=argparse.RawTextHelpFormatter)
 
@@ -138,7 +138,7 @@ def _run_setup():
             if config.final_model.overwrite_final_repo_models:
                 config.final_model.save_path_models = [config.final_model.save_path_models]
                 config.final_model.save_path_models.append(
-                    Path(_aktirbd_root_file).parent.joinpath(f"models/pretrained/"))
+                    files('actitect.rbdisco').joinpath('models/pretrained/'))
         else:
             config.final_model.save_path_models = Path(config.final_model.save_path_models)
 

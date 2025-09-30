@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
 
-from actitect.utils import dict_minus_key
+from ..utils import dict_minus_key
 
 logger = logging.getLogger(__name__)
 

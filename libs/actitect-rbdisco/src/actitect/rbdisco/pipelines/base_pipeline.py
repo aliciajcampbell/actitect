@@ -4,8 +4,9 @@ from argparse import Namespace
 from pathlib import Path
 from typing import Union
 
-from actitect.classifier.tools import DataLoader
 from actitect.config import PipelineConfig, ExternalTestConfig
+from ..core import DataLoader
+
 
 logger = logging.getLogger(__name__)
 

@@ -1,0 +1,5 @@
+include LICENSE README.md
+recursive-include src/actitect/rbdisco/models *.joblib
+recursive-include src/actitect/rbdisco/config *.yaml *.json
+recursive-include src/actitect/rbdisco/_vendor/boruta_py *.*
+global-exclude *.py[cod] __pycache__/* .DS_Store

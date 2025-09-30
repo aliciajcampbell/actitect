@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=64.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "actitect-rbdisco"
+version = "0.3.1"
+description = "RBD Plugin for Actitect for RBD preditction from wrist actigraphy."
+readme = "README.md"
+requires-python = "==3.9.*"
+authors = [
+  { name = "David Bertram", email = "dbertram@uni-koeln.de" }
+]
+maintainers = [
+     { name = "David Bertram", email = "dbertram@uni-koeln.de" }
+]
+license = { file = "LICENSE" }
+classifiers = [
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+  "Operating System :: OS Independent",
+  "Natural Language :: English",
+  "Programming Language :: Python :: 3.9",
+  "License :: OSI Approved :: MIT License",
+  "Environment :: Console"
+]
+
+dependencies = [
+  # actitect core
+  "actitect>=0.3.1",
+
+  # ml helpers
+  "imbalanced_learn==0.12.0",  # smote
+  "mrmr_selection==0.2.8",  # feature selection
+  "umap_learn==0.5.5",  # feature space projections
+  "xgboost==2.0.3",
+  "shap==0.45.1",  # xgb importances
+
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.3.4",
+  "setuptools>=64.0",
+]
+
+[project.scripts]
+actitect-rbdisco = "actitect.rbdisco.cli:main" #
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages]
+find = { where = ["src"] }
+
+[tool.setuptools.package-data]
+"actitect" = ["rbdisco/models/**/*.joblib", "_vendor/boruta_py/**/*"]
+
+[project.urls]
+Repository = "todo"
+Publication = "todo"

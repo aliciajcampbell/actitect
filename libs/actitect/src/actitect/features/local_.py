@@ -29,9 +29,8 @@ __all__ = [
     'movement_duration',
     'poincare_features']
 
-# TODO: make option! (in config or here?)
-NP_FLOAT_PRECISION = np.float64
 
+NP_FLOAT_PRECISION = np.float64
 MIN_TIMESERIES_SAMPLES = 20
 
 

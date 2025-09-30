@@ -18,16 +18,15 @@ from sklearn.utils.validation import has_fit_parameter
 from skopt.plots import plot_convergence
 
 from actitect import utils
-from actitect.classifier.models import ModelFactory, ModelSetup
-from actitect.classifier.tools.classification_threshold import get_night_and_patient_threshold
-from actitect.classifier.tools.cv_iterator import cv_iterator
-from actitect.classifier.tools.evaluator import Evaluator
-from actitect.classifier.tools.feature_set import FeatureSet, Fold
-from actitect.classifier.tools.hp_optimizers import BayesianOptCV
-from actitect.classifier.tools.metrics import calc_evaluation_metrics
-from actitect.classifier.tools.probability_calibration import CustomCalibratedClassifierCV
 from actitect.config import PipelineConfig, DatasetConfig, ModelConfig
-from actitect.utils import visualization
+from actitect import vis
+from .cv_iterator import cv_iterator
+from .hp_optimizers import BayesianOptCV
+from ..core import Evaluator, FeatureSet, Fold
+from ..models import ModelFactory, ModelSetup
+from ..processing.classification_threshold import get_night_and_patient_threshold
+from ..processing.probability_calibration import CustomCalibratedClassifierCV
+from ..processing.metrics import calc_evaluation_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +49,7 @@ class NestedCVBase(ABC):
 
         self.use_fixed_features = bool(getattr(self.config.model.feature_selection, 'fixed_features', None))
 
-        raw_ds_mode = getattr(config.model, 'dataset_weighting', None) # e.g. dsw:bay_on
+        raw_ds_mode = getattr(config.model, 'dataset_weighting', None)  # e.g. dsw:bay_on
         if raw_ds_mode:
             mode_part, flag_part = (raw_ds_mode.split(":", 1) + ['bay_off'])[:2]
             mode, flag = mode_part.lower().strip(), flag_part.lower().strip()
@@ -676,7 +675,7 @@ class NestedCVBase(ABC):
                     _recurse_dict_(value, new_key_path, figs_dict)
                 elif isinstance(value, pd.DataFrame):
                     value = value.T
-                    figs_dict[new_key_path] = visualization.draw_cv_boxplot(
+                    figs_dict[new_key_path] = vis.draw_cv_boxplot(
                         {metric: value.loc[metric, :].values for metric in value.index})
                     plt.close('all')
 
@@ -698,10 +697,10 @@ class NestedCVBase(ABC):
                     _recurse_dict_(value, new_key_path, figs_dict)
                 elif isinstance(first_value, list):
                     if 'roc' in new_key_path:
-                        figs_dict[new_key_path] = visualization.draw_cv_roc_or_pr_curve(
+                        figs_dict[new_key_path] = vis.draw_cv_roc_or_pr_curve(
                             value, 'roc', lodo_labels=lodo_lbls)
                     elif 'pr' in new_key_path:
-                        figs_dict[new_key_path] = visualization.draw_cv_roc_or_pr_curve(
+                        figs_dict[new_key_path] = vis.draw_cv_roc_or_pr_curve(
                             value, 'pr', lodo_labels=lodo_lbls)
 
         if include_night:
@@ -791,6 +790,7 @@ class NestedCVBase(ABC):
     @staticmethod
     def _count_unique_datasets(data: FeatureSet):
         return len(np.unique(data.dataset)) if data.dataset is not None else 1
+
 
 class KFoldNestedCV(NestedCVBase):
 

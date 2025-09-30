@@ -6,11 +6,10 @@ from typing import Type, Union
 import numpy as np
 
 from actitect import utils
-from actitect.classifier.pipelines import BasePipeline
-from actitect.classifier.tools import ModelManager
-from actitect.classifier.tools.feature_set import FeatureSet
-from actitect.classifier.tools.nested_cv import KFoldNestedCV, LODONestedCV
 from actitect.config import PipelineConfig, ExternalTestConfig
+from .base_pipeline import BasePipeline
+from ..core import FeatureSet, ModelManager
+from ..blocks import KFoldNestedCV, LODONestedCV
 
 logger = logging.getLogger(__name__)
 

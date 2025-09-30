@@ -1,3 +1,33 @@
+# OS / Python
+**/__pycache__/
+**/*.py[cod]
+**/.DS_Store
+.venv/
+.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# IDE
+.idea/
+
+# build artifacts (top-level + per-package)
+build/
+dist/
+*.egg-info
+libs/*/build/
+libs/*/dist/
+libs/*/*.egg-info
+
+# copied docs (not tracked; copied at build time)
+libs/actitect/README.md
+libs/actitect/LICENSE
+libs/actitect-rbdisco/README.md
+libs/actitect-rbdisco/LICENSE
+libs/actitect/src/actitect/config/experiment_root.local.json
+
+# Data blobs
 *.csv
 *.xlsx
 *.cwa
@@ -6,16 +36,6 @@
 *.png
 *.tar
 *.npy
-*.json
 *.gz
 *.h5
 *.parquet
-*.egg-info
-
-
-**/__pycache__/
-**/.DS_Store
-
-/src/aktiRBD/scripts/notebooks/.ipynb_checkpoints/
-/build/
-.idea/

@@ -8,8 +8,9 @@ from zipfile import ZipFile
 import numpy as np
 import pandas as pd
 
-from actitect.actimeter.basedevice import BaseDevice
-from actitect.actimeter.devices._actigraph_dtypes import LogRecordV1, LogRecordV2
+from ..basedevice import BaseDevice
+
+from ..devices._actigraph_dtypes import LogRecordV1, LogRecordV2
 
 __all__ = ['ActiGraph']
 

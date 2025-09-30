@@ -14,59 +14,16 @@ from scipy import stats
 from sklearn.preprocessing import MinMaxScaler
 
 from actitect import utils
-from actitect.classifier import ModelFactory
-from actitect.classifier.tools.feature_set import FeatureSet
 from actitect.config import DataConfig
-from actitect.external.boruta_py.boruta import BorutaPy
+
+from ..models import ModelFactory
+from ..core import FeatureSet
+
+from .._vendor.boruta_py.boruta import BorutaPy
 
 logger = logging.getLogger(__name__)
 
 __all__ = ['FeatureRanker']
-
-'''def fetch_or_compute_feat_ranks(data: FeatureSet, rank_path: Path, data_config: DataConfig, n_jobs: int,
-                                return_df: bool = False, draw_plots: bool = False):
-    """ Fetches or computes feature rankings for either a fold or the full dataset.
-    Parameters:
-        :param data: (FeatureSet) if FeatureSet from Fold, full dataset will be processed, else fold-level rankings.
-        :param rank_path: (Path) pointing to the directory where ranking files are/or will be stored.
-        :param data_config: (DataConfig) instance containing data meta-config.
-        :param draw_plots: Boolean flag to indicate if plots should be drawn. Default is False.
-        :param n_jobs: Number of jobs for parallel processing.
-        :param return_df: Boolean flag to return a DataFrame instead of a dictionary.
-    Returns:
-        :return: Feature ranking as a DataFrame or dictionary. """
-    assert isinstance(data, FeatureSet), f"argument 'data' must be of type 'FeatureSet' ({type(FeatureSet)})"
-    _from_fold = getattr(data, 'from_fold', None)
-    if isinstance(_from_fold, dict):  # data is on fold-level
-        ranking_file = rank_path.joinpath(
-            f"fold_{_from_fold['k']}/{_from_fold['name']}/combined_rankings_{data_config.agg_level}.csv")
-        log_message_prefix = f"fold {_from_fold['k']}"
-    else:  # data contains full dataset
-        ranking_file = rank_path.joinpath(f"combined_rankings_{data_config.agg_level}.csv")
-        log_message_prefix = "full training set"
-
-    if ranking_file.exists():
-        logger.info(f"found pre-computed ranking for {rank_path.stem} at {log_message_prefix}.")
-        rank_df = pd.read_csv(ranking_file).set_index('total_rank')
-    else:
-        logger.warning(f"no pre-computed ranking file found for '{rank_path}' at {log_message_prefix},"
-                       f"computation may take a while.")
-
-        ranker = FeatureRanker(data, data_config, ranking_file.parent, n_jobs=n_jobs, draw_plot=draw_plots)
-        rank_df = ranker.run()
-
-    if return_df:
-        rank_mapping_df = rank_df.reset_index()[['name', 'total_rank']]
-        rank_mapping_df['idx'] = rank_mapping_df['name'].map({name: idx for idx, name in enumerate(data.feat_map)})
-        rank_mapping_df = rank_mapping_df.set_index('idx').sort_index()
-        return rank_mapping_df
-    else:
-        _feature_ranking = rank_df.name.values  # df is sorted by rank
-        return {  # maps each feat. name to its idx in x and its rank in _feature_ranking
-            name: {'idx': idx, 'rank': np.where(_feature_ranking == name)[0][0] + 1}
-            for idx, name in enumerate(data.feat_map)
-        }
-'''
 
 
 class FeatureRanker:

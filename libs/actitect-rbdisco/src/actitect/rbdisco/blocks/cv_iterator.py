@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.model_selection import BaseCrossValidator, StratifiedKFold, RepeatedStratifiedKFold, \
     StratifiedGroupKFold, StratifiedShuffleSplit
 
-from actitect.classifier.tools.feature_set import FeatureSet, Fold
+from ..core import FeatureSet, Fold
 
 __all__ = ['cv_iterator']
 

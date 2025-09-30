@@ -8,8 +8,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-import actitect.utils as utils
-import actitect.processing as processing
+from .. import utils
+from .. import processing
 
 __all__ = ['BaseDevice', 'ResolveNwSleepParams']
 logger = logging.getLogger(__name__)

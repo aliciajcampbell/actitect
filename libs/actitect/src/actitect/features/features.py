@@ -1,4 +1,4 @@
-""" Functions to generate the features from the time-series data."""
+""" Functions to generate descriptive motion features from time-series data."""
 
 import logging
 from dataclasses import dataclass, field
@@ -9,9 +9,9 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 
-import actitect.features.global_ as global_functions
-import actitect.features.local_ as local_functions
-import actitect.utils as utils
+from .. import utils
+from . import global_ as global_feats
+from . import local_ as local_feats
 
 logger = logging.getLogger(__name__)
 
@@ -84,21 +84,21 @@ class CalcLocalMoveFeatures:
                 f"input must be of type pd.Series or np.array, not {type(prop)}"
 
         feature_calls = {
-            'moments': dict(func=local_functions.moment_features, args=(acc_mag, acc_x, acc_y, acc_z), kwargs={}),
-            'quantiles': dict(func=local_functions.quantile_features, args=(acc_mag, acc_x, acc_y, acc_z), kwargs={}),
-            'energy': dict(func=local_functions.energy_features, args=(acc_mag, acc_x, acc_y, acc_z),
+            'moments': dict(func=local_feats.moment_features, args=(acc_mag, acc_x, acc_y, acc_z), kwargs={}),
+            'quantiles': dict(func=local_feats.quantile_features, args=(acc_mag, acc_x, acc_y, acc_z), kwargs={}),
+            'energy': dict(func=local_feats.energy_features, args=(acc_mag, acc_x, acc_y, acc_z),
                            kwargs={}),
-            'spectral': dict(func=local_functions.spectral_features, args=(acc_mag,), kwargs=dict(
+            'spectral': dict(func=local_feats.spectral_features, args=(acc_mag,), kwargs=dict(
                 n_dom_freqs=self.setup.SPECTRAL_N_DOM_FREQS,
                 target_frequencies_hz=self.setup.SPECTRAL_TARGET_FREQS, sample_rate=self.sample_rate)),
-            'auto_corr': dict(func=local_functions.autocorr_features, args=(acc_mag, acc_x, acc_y, acc_z), kwargs=dict(
+            'auto_corr': dict(func=local_feats.autocorr_features, args=(acc_mag, acc_x, acc_y, acc_z), kwargs=dict(
                 sample_rate=self.sample_rate, peak_prom_threshold=self.setup.AC_PEAK_PROM_THRESHOLD_AUTO_CORR)),
-            'peaks': dict(func=local_functions.peak_features, args=(acc_mag,), kwargs=dict(
+            'peaks': dict(func=local_feats.peak_features, args=(acc_mag,), kwargs=dict(
                 sample_rate=self.sample_rate, peak_prom_threshold=self.setup.PEAKS_PROM_THRESHOLD,
                 min_peak_distance=self.setup.PEAKS_MIN_DISTANCE)),
-            'nold': dict(func=local_functions.non_linear_dynamic_features, args=(acc_mag, acc_x, acc_y, acc_z),
+            'nold': dict(func=local_feats.non_linear_dynamic_features, args=(acc_mag, acc_x, acc_y, acc_z),
                          kwargs=dict(emb_dim=self.setup.NOLD_EMB_DIM)),
-            'poincare': dict(func=local_functions.poincare_features, args=(acc_mag,), kwargs={})}
+            'poincare': dict(func=local_feats.poincare_features, args=(acc_mag,), kwargs={})}
 
         local_features = {}
         for feature_name, spec in feature_calls.items():
@@ -124,7 +124,7 @@ class CalcGlobalMoveFeatures:
 
         # cluster features:
         _debug = True if self.create_cluster_plots else False
-        cluster_feats, debug_info = global_functions.cluster_features(
+        cluster_feats, debug_info = global_feats.cluster_features(
             move_segments,
             kde_kwargs=self.setup.CLUSTER_KDE_KWARGS,
             peak_kwargs=self.setup.CLUSTER_PEAK_KWARGS_KDE,
@@ -173,9 +173,9 @@ class CalcGlobalMoveFeatures:
             plt.close()
 
         # moves per time:
-        global_features.update(global_functions.n_moves_per_time(move_segments))
+        global_features.update(global_feats.n_moves_per_time(move_segments))
 
         # move durations:
-        global_features.update(global_functions.movement_durations(move_segments))
+        global_features.update(global_feats.movement_durations(move_segments))
 
         return global_features

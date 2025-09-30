@@ -1,0 +1,3 @@
+include LICENSE README.md
+recursive-include src/actitect/config *.yaml *.json
+global-exclude *.py[cod] __pycache__/* .DS_Store

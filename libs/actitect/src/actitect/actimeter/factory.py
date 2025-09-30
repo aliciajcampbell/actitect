@@ -2,8 +2,8 @@ import logging
 from pathlib import Path
 from typing import Union
 
-from actitect import utils
-from actitect.actimeter.devices import ActiGraph, AxivityAx6, GenericCSV, GENEActiv
+from .. import utils
+from .devices import ActiGraph, AxivityAx6, GenericCSV, GENEActiv
 
 __all__ = ['ActimeterFactory', 'SUPPORTED_FILETYPES']
 

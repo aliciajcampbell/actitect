@@ -14,13 +14,14 @@ from skopt.plots import plot_convergence, plot_evaluations, plot_objective
 from skopt.space import Integer, Real, Categorical
 
 from actitect import utils
-from actitect.classifier.models import ModelFactory
-from actitect.classifier.tools import BayesianOptCV
-from actitect.classifier.tools.classification_threshold import get_night_and_patient_threshold
-from actitect.classifier.tools.evaluator import Evaluator
-from actitect.classifier.tools.feature_set import FeatureSet
-from actitect.classifier.tools.probability_calibration import CustomCalibratedClassifierCV
 from actitect.config import PipelineConfig, ExternalTestConfig, ExperimentConfig, ModelConfig
+from .evaluator import Evaluator
+from .feature_set import FeatureSet
+from ..blocks import BayesianOptCV
+from ..processing.classification_threshold import get_night_and_patient_threshold
+from ..processing.probability_calibration import CustomCalibratedClassifierCV
+from ..models import ModelFactory
+
 
 __all__ = ['ModelManager']
 logger = logging.getLogger(__name__)

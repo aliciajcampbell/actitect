@@ -9,12 +9,11 @@ import pandas as pd
 from sklearn import metrics
 
 from actitect import utils
-from actitect.classifier.tools.aggregation import aggregate_night_predictions_to_patient_level
-from actitect.classifier.tools.classification_threshold import classify_with_threshold, eval_roc_and_pr_curves, \
-    ClassThreshold
-from actitect.classifier.tools.feature_set import FeatureSet, Fold
-from actitect.classifier.tools.metrics import calc_evaluation_metrics
 from actitect.config import ExperimentConfig, NestedCVConfig
+from .feature_set import FeatureSet, Fold
+from ..processing.aggregation import aggregate_night_predictions_to_patient_level
+from ..processing.classification_threshold import classify_with_threshold, eval_roc_and_pr_curves, ClassThreshold
+from ..processing.metrics import calc_evaluation_metrics
 
 __all__ = ['Evaluator']
 

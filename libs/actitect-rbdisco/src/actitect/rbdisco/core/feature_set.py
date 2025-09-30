@@ -6,8 +6,8 @@ from typing import Dict, Optional, Union
 import numpy as np
 from sklearn import preprocessing
 
-from actitect.classifier.tools.apply_smote import apply_smote_with_group_mapping
 from actitect import utils
+from ..processing.apply_smote import apply_smote_with_group_mapping
 
 __all__ = ['FeatureSet', 'Fold']
 
@@ -631,7 +631,7 @@ class FeatureSet:
         from pathlib import Path
         import numpy as np
         import pandas as pd
-        from actitect.features.ranking import FeatureRanker
+        from ..processing.feature_ranking import FeatureRanker
 
         # Parse fair aggregation request
         fair_agg = rank_kwargs.get('fair_agg')
@@ -774,80 +774,3 @@ class Fold:
             setattr(self.feature_set, name, value)  # write-through to inner FeatureSet
         else:
             super().__setattr__(name, value)  # fallback: new attr on Fold
-
-
-if __name__ == '__main__':
-    import numpy as np
-    from actitect.utils import setup_logging
-    from actitect.classifier.tools.feature_set import FeatureSet, Fold
-
-    # Initialize logging
-    setup_logging()
-
-    # Set random seed for reproducibility
-    np.random.seed(42)
-
-    # Parameters for data generation
-    n_features = 50
-    n_class0 = 90  # Majority class
-    n_class1 = 30  # Minority class (to allow SMOTE to generate synthetic samples)
-
-    # Generate training data for class 0
-    x_train_class0 = np.random.randn(n_class0, n_features) + 0  # Centered at 0
-    y_train_class0 = np.zeros(n_class0, dtype=int)
-    group_train_class0 = np.random.randint(1, 6, size=n_class0)  # Random group IDs between 1 and 5
-
-    # Generate training data for class 1
-    x_train_class1 = np.random.randn(n_class1, n_features) + 5  # Centered at 5
-    y_train_class1 = np.ones(n_class1, dtype=int)
-    group_train_class1 = np.random.randint(1, 6, size=n_class1)
-
-    # Combine training data
-    x_train = np.vstack((x_train_class0, x_train_class1))
-    y_train = np.concatenate((y_train_class0, y_train_class1))
-    group_train = np.concatenate((group_train_class0, group_train_class1))
-
-    # Feature mapping
-    feat_map = np.array([f'feature{i + 1}' for i in range(n_features)])
-
-    # Generate test data
-    n_test_samples = 6
-    x_test = np.random.randn(n_test_samples, n_features) + 2  # Centered at (2,2,2)
-    y_test = np.random.choice([0, 1], size=n_test_samples, p=[0.5, 0.5])  # Balanced classes in test set
-    group_test = np.random.randint(1, 6, size=n_test_samples)
-
-    # Create FeatureSet instances
-    train_set = FeatureSet(x=x_train, y=y_train, group=group_train, feat_map=feat_map)
-    test_set = FeatureSet(x=x_test, y=y_test, group=group_test, feat_map=feat_map)
-
-    # Create Fold instances for training and testing
-    train_fold = Fold(name="Train Fold", k=1, feature_set=train_set)
-    test_fold = Fold(name="Test Fold", k=1, feature_set=test_set)
-
-    # print(train_fold)
-    # print(train_fold.copy())
-    from pathlib import Path
-    from actitect.config import DataConfig
-
-    _kwargs = {'scaler': 'robust', 'use_smote': True, 'smote_seed': 42, 'scaling_order': 'before_ranking',
-               'rank_kwargs': {
-                   'rank_path': Path('/Users/david/Desktop/test'), 'data_config': DataConfig, 'n_jobs': -1, }}
-    train_processed = train_fold.copy().fit_transform(**_kwargs)
-    print(type(train_processed))
-
-    raise SystemExit
-    for _scaler in ['standard', 'minmax', 'robust', 'none']:
-        # Fit and transform the training set
-        train_fold.fit_transform(
-            scaler=_scaler, use_smote=True, smote_seed=42, rank_kwargs=None, scaling_order="before_ranking")
-
-        # Transform the test set using the process_params from the training set
-        # print(train_fold.feature_set.process_params)
-        test_fold.transform(train_fold.feature_set.process_params)
-        print(test_fold.copy())
-
-        # Print process parameters for verification
-        print(f"{_scaler} with SMOTE Process Params:")
-        print(list(train_fold.feature_set.process_params.keys()))
-        print(train_fold.feature_set.process_params)
-        break

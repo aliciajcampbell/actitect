@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from actitect import utils
-from actitect.actimeter.basedevice import BaseDevice
+from ... import utils
+from ..basedevice import BaseDevice
 
 __all__ = ['GenericCSV']
 
