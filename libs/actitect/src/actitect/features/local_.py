@@ -7,7 +7,7 @@ import gc
 import logging
 import warnings
 
-import nolds
+from nolds import sampen, hurst_rs
 import numpy as np
 import pandas as pd
 import scipy
@@ -15,6 +15,9 @@ import statsmodels.tsa.stattools as stattools
 import matplotlib.pyplot as plt
 from pyhrv.nonlinear import poincare
 from sklearn.exceptions import UndefinedMetricWarning
+
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -332,9 +335,9 @@ def non_linear_dynamic_features(magnitude, x, y, z, emb_dim: int):
                 )
 
                 non_lin_feats.update({
-                    f"SampEn_{name}": nolds.sampen(data, emb_dim, debug_plot=False),
+                    f"SampEn_{name}": sampen(data, emb_dim, debug_plot=False),
                     # f"corr_dim_{name}": nolds.corr_dim(data, emb_dim, debug_plot=False),
-                    f"hurst_rs_{name}": nolds.hurst_rs(data),
+                    f"hurst_rs_{name}": hurst_rs(data),
                     # f"lyap_r_{name}": nolds.lyap_r(data),
                     # f"lyap_mean_{name}": np.mean(nolds.lyap_e(data)),
                     # f"lyap_std_{name}": np.std(nolds.lyap_e(data)),

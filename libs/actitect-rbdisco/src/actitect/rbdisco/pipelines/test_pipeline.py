@@ -3,7 +3,8 @@ from pathlib import Path
 
 from actitect import utils
 from .base_pipeline import BasePipeline
-from ..core import FeatureSet, ModelManager
+from ..core.types import FeatureSet
+from ..core.manager import ModelManager
 
 logger = logging.getLogger(__name__)
 

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from typing import Union
 
-from ..core import FeatureSet, Fold
+from ..core.types import FeatureSet, Fold
 
 logger = logging.getLogger(__name__)
 

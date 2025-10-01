@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.model_selection import BaseCrossValidator, StratifiedKFold, RepeatedStratifiedKFold, \
     StratifiedGroupKFold, StratifiedShuffleSplit
 
-from ..core import FeatureSet, Fold
+from ..core.types import FeatureSet, Fold
 
 __all__ = ['cv_iterator']
 

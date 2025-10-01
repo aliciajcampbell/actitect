@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pandas as pd
 
-import utils
-from actimeter import SUPPORTED_FILETYPES
-from processing.file_processor import FileProcessor
+from . import utils
+from .actimeter import SUPPORTED_FILETYPES
+from .processing.file_processor import FileProcessor
 
 
 def _process_dataset(args: argparse.Namespace, processing_kwargs: dict, feature_kwargs: dict, logger: logging.Logger):
@@ -77,7 +77,7 @@ def _process_dataset(args: argparse.Namespace, processing_kwargs: dict, feature_
 def _parse_args():
     """ Parses command-line arguments for preprocessing. Use 'ActiTect-process --help' for details."""
     parser = argparse.ArgumentParser(
-        prog='ActiTect-process',
+        prog='actitect-process',
         description='Preprocess actigraphy data by standardizing, segmenting sleep windows,'
                     ' and calculating nocturnal motion features.',
         formatter_class=argparse.RawTextHelpFormatter)

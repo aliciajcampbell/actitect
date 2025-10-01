@@ -17,7 +17,7 @@ from actitect import utils
 from actitect.config import DataConfig
 
 from ..models import ModelFactory
-from ..core import FeatureSet
+from ..core.types import FeatureSet
 
 from .._vendor.boruta_py.boruta import BorutaPy
 

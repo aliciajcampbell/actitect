@@ -83,11 +83,11 @@ class BaseDevice(ABC):
             with utils.Timer() as load_timer:
                 raw_df, header = self._parse_binary_to_df(header_only=header_only)
                 if not header_only:
-                    processing.assert_valid_df(raw_df)
+                    utils.assert_valid_df(raw_df)
                     if resolve_duplicates:
                         _info_for_print = {'patient_id': self.meta['patient_id'], 'sample_rate': header['sample_rate']}
-                        raw_df = processing.handle_duplicate_timestamps(raw_df, remove_dupes=True, **_info_for_print)
-                    _is_uniform, _mean_fs, _std_fs = processing.infer_mean_sample_rate(raw_df)
+                        raw_df = utils.handle_duplicate_timestamps(raw_df, remove_dupes=True, **_info_for_print)
+                    _is_uniform, _mean_fs, _std_fs = utils.infer_mean_sample_rate(raw_df)
 
             if not header_only:
                 self.meta['raw_data_loaded'] = True
@@ -209,8 +209,8 @@ class BaseDevice(ABC):
 
         if _apply_resampling:
             x_df = processing.resample_df_uniform(x_df, target_fs)
-            processing.assert_valid_df(x_df)
-            _is_uniform, _mean_fs, _std_fs = processing.infer_mean_sample_rate(x_df)
+            utils.assert_valid_df(x_df)
+            _is_uniform, _mean_fs, _std_fs = utils.infer_mean_sample_rate(x_df)
             if not (np.isclose(_mean_fs, target_fs, rtol=1e-5, atol=1e-8) or _is_uniform):
                 _status = (f"error: resampling rate ({_mean_fs:.2f} Hz does not match target ({target_fs:.2f} Hz))"
                            f"or is not uniform (std = {_std_fs} Hz).")
@@ -228,7 +228,7 @@ class BaseDevice(ABC):
         kwargs['fs'] = (self.processing_info['resampling'].get('resample_fs_mean')
                         or np.ceil(self.processing_info['resampling'].get('raw_fs_mean'))).astype('int')
         x_df = processing.butterworth_bandpass(x_df, **kwargs)
-        processing.assert_valid_df(x_df)
+        utils.assert_valid_df(x_df)
 
         self.processing_info['filter'].update({f"{filter_name}": {'kwargs': kwargs}})
         return x_df
@@ -237,7 +237,7 @@ class BaseDevice(ABC):
     def _auto_calibrate(self, x_df: pd.DataFrame):
         """ Perform auto-calibration to align axis."""
         x_df, _info = processing.van_hees_sphere_calibration(x_df)
-        processing.assert_valid_df(x_df)
+        utils.assert_valid_df(x_df)
         _status = _info.pop('calib_ok')
         if _status == 0:
             raise ValueError(f'Calibration failed with status {_status}.')
@@ -252,7 +252,7 @@ class BaseDevice(ABC):
     def _infer_nonwear_segments(self, x_df: pd.DataFrame):
         """Find non-wear segments in the data. Will add a boolean 'wear' column to the returned DataFrame."""
         x_df, _info = processing.segment_non_wear_episodes(x_df)
-        processing.assert_valid_df(x_df)
+        utils.assert_valid_df(x_df)
 
         logger.info(f"(non-wear: {self.meta['patient_id']}) wear-time-segmentation summary:"
                     f"wear={_info['total_wear_time(d)']:.2f}d, non-wear={_info['non_wear_time(d)']:.2f}d"
@@ -275,7 +275,7 @@ class BaseDevice(ABC):
         logger.info(f"(sleep-segmentation: {self.meta['patient_id']}) sleep-segmentation summary:"
                     f"found n={len(_durations_h):.0f} sptws with n={len(_durations_above_5h):.0f} above 5h with "
                     f"durations {np.nanmean(_durations_above_5h):.1f}±{np.nanstd(_durations_above_5h):.1f}h")
-        processing.assert_valid_df(x_df)
+        utils.assert_valid_df(x_df)
         if 'wear' in x_df.columns:
             x_df, (_init_num_amb, _final_num_amb) = self._resolve_nonwear_sleep(x_df, _sptw, self.resolve_nw_params)
             if _init_num_amb:

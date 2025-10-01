@@ -8,7 +8,7 @@ from sklearn import metrics
 from actitect import utils
 from actitect.vis import draw_roc_or_pr_curve
 from .aggregation import aggregate_night_predictions_to_patient_level
-from ..core import FeatureSet, Fold
+from ..core.types import FeatureSet, Fold
 
 __all__ = ['get_operating_point', 'classify_with_threshold', 'eval_roc_and_pr_curves',
            'ClassThreshold', 'get_night_and_patient_threshold']

@@ -2,7 +2,8 @@ import logging
 
 from actitect import utils
 from .base_pipeline import BasePipeline
-from ..core import FeatureSet, ModelManager
+from ..core.types import FeatureSet
+from ..core.manager import ModelManager
 from ..blocks import KFoldNestedCV
 
 logger = logging.getLogger(__name__)

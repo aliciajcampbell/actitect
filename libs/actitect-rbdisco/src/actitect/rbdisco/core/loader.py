@@ -10,7 +10,7 @@ from sklearn.utils.class_weight import compute_class_weight
 
 from actitect import utils
 from actitect.config import RebalanceDatasetsConfig
-from .feature_set import FeatureSet
+from .types import FeatureSet
 
 
 __all__ = ['DataLoader']

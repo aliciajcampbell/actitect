@@ -93,7 +93,7 @@ def check_make_dir(dir_path: Path, use_existing=False, verbose=True, time_extens
 
 
 def get_experiment_root() -> Path:
-    cfg_dir = files('actitect').joinpath('config')
+    cfg_dir = files('actitect.config')
     for name in ('experiment_root.local.json', 'experiment_root.json'):
         p = cfg_dir / name
         try:

@@ -12,7 +12,6 @@ import pandas as pd
 import pyarrow
 import pyarrow.parquet as parquet
 
-from .utils import extract_segments
 from .movements import segment_nocturnal_movements
 from .. import utils
 from ..features import CalcLocalMoveFeatures, CalcGlobalMoveFeatures
@@ -68,11 +67,11 @@ class FileProcessor:
             self.pbar.set_description(f"[PROGRESS]: Processing files")
             self.pbar.set_postfix({
                 "file": f"{self.saving_suffix}",
-                "save_processed": operational_kwargs.save_processed,
-                "create_plots": operational_kwargs.create_plots,
-                "redo_processing": operational_kwargs.redo_processing,
-                "skip_feature_calc": operational_kwargs.skip_feature_calc,
-                "delete_processed_files": operational_kwargs.delete_processed_files
+                # "save_processed": operational_kwargs.save_processed,
+                # "create_plots": operational_kwargs.create_plots,
+                # "redo_processing": operational_kwargs.redo_processing,
+                # "skip_feature_calc": operational_kwargs.skip_feature_calc,
+                # "delete_processed_files": operational_kwargs.delete_processed_files
             })
 
         # 0. handle the deletion case (cleanup mode)
@@ -189,12 +188,12 @@ class FileProcessor:
         params = params if params else ResolveNwSleepParams()
 
         # get non-wear segments: (start, end, length)
-        non_wears = extract_segments(
+        non_wears = utils.extract_segments(
             processed_df, column='wear', condition=False, add_during_night_indicator=True,
             night_start=params.night_start, night_end=params.night_end, during_night_h_thres=.1)
 
         # get sptw segments: (start, end, length)
-        sptws = extract_segments(
+        sptws = utils.extract_segments(
             processed_df, column='sptw', condition=True, add_during_night_indicator=True,
             night_start=params.night_start, night_end=params.night_end,
             during_night_h_thres=params.night_sptw_duration_during_night_h)
@@ -290,7 +289,7 @@ class FileProcessor:
     def _calc_global_features(self, _night_df: pd.DataFrame, _night_sptw: pd.DataFrame, _night_idx: int):
 
         # get a representation as start, end, length where each row corresponds to one movement
-        night_move_segments = extract_segments(_night_df, 'movement', True, time_unit='s')
+        night_move_segments = utils.extract_segments(_night_df, 'movement', True, time_unit='s')
 
         # apply a duration filter if specified:
         if isinstance(self.feat_kwargs['filter_move_durations'], tuple):

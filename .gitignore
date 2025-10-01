@@ -39,3 +39,4 @@ libs/actitect/src/actitect/config/experiment_root.local.json
 *.gz
 *.h5
 *.parquet
+*.back

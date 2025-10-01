@@ -16,8 +16,8 @@ from skopt.space import Integer, Real, Categorical
 from actitect import utils
 from actitect.config import PipelineConfig, ExternalTestConfig, ExperimentConfig, ModelConfig
 from .evaluator import Evaluator
-from .feature_set import FeatureSet
-from ..blocks import BayesianOptCV
+from .types import FeatureSet
+from ..blocks.hp_optimizers import BayesianOptCV
 from ..processing.classification_threshold import get_night_and_patient_threshold
 from ..processing.probability_calibration import CustomCalibratedClassifierCV
 from ..models import ModelFactory
@@ -167,10 +167,11 @@ class ModelManager:
             if 'singleCenter' in dataset_save_tag:
                 joblib.dump(core_model_dict, _model_save_path.joinpath(f'{dataset_save_tag}Core.joblib'))
                 if self.config.final_model.include_pretrain_merged and extend_train is not None and extended_model_dict:
-                    joblib.dump(extended_model_dict, _model_save_path.joinpath(f'{dataset_save_tag}Extended.joblib'))
+                    self._dump_with_backup(
+                        extended_model_dict, _model_save_path.joinpath(f'{dataset_save_tag}Extended.joblib'))
                 logger.info(f"successfully dumped models to {_model_save_path}")
             else:
-                joblib.dump(core_model_dict, _model_save_path.joinpath(f'{dataset_save_tag}.joblib'))
+                self._dump_with_backup(core_model_dict, _model_save_path.joinpath(f'{dataset_save_tag}.joblib'))
                 logger.info(f"successfully dumped models to {_model_save_path}")
 
     def predict(self, test: FeatureSet, model_dict_file: Path):
@@ -594,3 +595,15 @@ class ModelManager:
             yield
         finally:
             self.current_context = previous_context
+
+    @staticmethod
+    def _dump_with_backup(obj, path: Path) -> None:
+        """If <path> exists, move it to <path>.back, then write the new file."""
+        path = Path(path)
+        backup = path.with_suffix(path.suffix + ".back")
+        if path.exists():  # ensure we don't keep a stale .back
+            if backup.exists():
+                backup.unlink()
+            # atomic rename of old file -> .back (same filesystem)
+            path.replace(backup)
+        joblib.dump(obj, path)
