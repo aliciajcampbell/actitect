@@ -8,6 +8,7 @@ from typing import List, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from boruta import BorutaPy
 from joblib import Parallel, delayed
 from mrmr import mrmr_classif
 from scipy import stats
@@ -15,11 +16,8 @@ from sklearn.preprocessing import MinMaxScaler
 
 from actitect import utils
 from actitect.config import DataConfig
-
-from ..models import ModelFactory
 from ..core.types import FeatureSet
-
-from .._vendor.boruta_py.boruta import BorutaPy
+from ..models import ModelFactory
 
 logger = logging.getLogger(__name__)
 
