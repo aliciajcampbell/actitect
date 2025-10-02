@@ -91,7 +91,7 @@ def _parse_args():
 
     parser.add_argument(
         '-c', '--config_file', type=str,
-        default='./ActiTect/libs/actitect/src/actitect/config/preprocessing.yaml',
+        default='./ActiTect/libs/actitect/src/actitect/config/default_preprocessing.yaml',
         help='Location of the config .yaml file that defines preprocessing settings.'
     )
 
@@ -103,7 +103,7 @@ def _parse_args():
 
     parser.add_argument(
         '-m', '--meta_file', type=str,
-        default='./data/raw/meta/metadata.csv',
+        default='./data/meta/metadata.csv',
         help="The path to the metadata.csv, relative to --root_dir."
     )
 

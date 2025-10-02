@@ -95,11 +95,32 @@ def _ensure_openmp():
             logging.info("OpenMP runtime is now available after installation.")
 
 
-def _set_experiment_root():
+def _resolve_repo_root() -> Path:
+    here = Path(__file__).resolve().parent
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=here, check=True, capture_output=True, text=True
+        )
+        git_root = Path(out.stdout.strip())
+        if git_root.exists():
+            return git_root
+    except Exception:
+        pass
+    # Walk upwards looking for sentinel files
+    sentinels = ("pyproject.toml", os.path.join("libs", "actitect", "pyproject.toml"))
+    for p in [here, *here.parents]:
+        if any((p / s).exists() for s in sentinels):
+            return p
+    logging.error("Could not locate repository root (no pyproject.toml found upwards from %s).", here)
+    sys.exit(1)
+
+
+def _set_experiment_root(repo_root: Path):
     """Experiment root which will be used for default data paths."""
-    _exp_root = Path(__file__).parents[1].resolve()
-    cfg_dir = Path(__file__).parent.joinpath('libs/actitect/src/actitect/config')
-    local_root_json = cfg_dir.joinpath('experiment_root.local.json')  # untracked local sidecar
+    _exp_root = repo_root.resolve()
+    cfg_dir = repo_root / 'libs' / 'actitect' / 'src' / 'actitect' / 'config'
+    local_root_json = cfg_dir / 'experiment_root.local.json'  # untracked local sidecar
     try:
         cfg_dir.mkdir(parents=True, exist_ok=True)
         with open(local_root_json, 'w') as f:
@@ -110,22 +131,21 @@ def _set_experiment_root():
         logging.warning('Could not write experiment_root.local.json. Skipping.')
 
 
-def _pip_install(path: str, dev: bool):
-    cmd = [sys.executable, '-m', 'pip', 'install']  # use current interpreter
+def _pip_install(path: Path, dev: bool):
+    cmd = [sys.executable, '-m', 'pip', 'install']
     if dev:
-        cmd += ['-e', path]
+        cmd += ['-e', str(path)]
     else:
-        cmd += [path]
+        cmd += [str(path)]
     logging.info("Installing: %s", " ".join(cmd))
     subprocess.run(cmd, check=True)
 
 
-def _prepare_pkg_docs():
+def _prepare_pkg_docs(repo_root: Path):
     """Copy main README and license to each libs root dir. PEP 517 build regulations."""
-    repo = Path(__file__).resolve().parent
-    src_readme = repo / "README.md"
-    src_license = repo / "LICENSE"
-    pkg_dirs = [repo / "libs" / "actitect", repo / "libs" / "actitect-rbdisco"]
+    src_readme = repo_root / "README.md"
+    src_license = repo_root / "LICENSE"
+    pkg_dirs = [repo_root / "libs" / "actitect", repo_root / "libs" / "actitect-rbdisco"]
     for pkg in pkg_dirs:
         if pkg.exists():
             if src_readme.exists():
@@ -137,9 +157,12 @@ def _prepare_pkg_docs():
 def main():
     args = _parse_args()
 
+    repo_root = _resolve_repo_root()
+    logging.info("Repository root: %s", repo_root)
+
     # Accept root or monorepo pyproject presence
-    if not (os.path.isfile('pyproject.toml') or os.path.isfile('libs/actitect/pyproject.toml')):
-        logging.error('pyproject.toml not found. Run this from the repository root.')
+    if not ((repo_root / 'pyproject.toml').exists() or (repo_root / 'libs' / 'actitect' / 'pyproject.toml').exists()):
+        logging.error('pyproject.toml not found under resolved repository root.')
         sys.exit(1)
 
     # 1: If installing with RBDisco (default), ensure OpenMP is available
@@ -149,18 +172,20 @@ def main():
         logging.info('--core-only specified: skipping OpenMP checks (RBDisco not installed).')
 
     # 2: Dynamically set the experiment root path
-    _set_experiment_root()
+    _set_experiment_root(repo_root)
 
     # 3: ensure README/LICENCE present for isolated builds
-    _prepare_pkg_docs()
+    _prepare_pkg_docs(repo_root)
 
     # 4: Install the Python package(s) using pip.
     try:
+        core_pkg = repo_root / 'libs' / 'actitect'
+        rbdisco_pkg = repo_root / 'libs' / 'actitect-rbdisco'
         if args.core_only:  # core only: install the core actigraphy dist
-            _pip_install('libs/actitect', args.dev)
+            _pip_install(core_pkg, args.dev)
         else:  # with RBDisco (default): install core, then plugin
-            _pip_install('libs/actitect', args.dev)
-            _pip_install('libs/actitect-rbdisco', args.dev)
+            _pip_install(core_pkg, args.dev)
+            _pip_install(rbdisco_pkg, args.dev)
 
     except subprocess.CalledProcessError as e:
         logging.error("Error during pip installation: %s", e)

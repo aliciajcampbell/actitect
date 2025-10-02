@@ -1,0 +1,18 @@
+# this is an example how a yaml config passed to actitect-process -c <path-to-yaml> should look like. You can use it to
+# tweak the data processing steps to fit your use case.
+
+processing_kwargs:
+  resample_rate: 'infer'    # leave empty to skip, use 'infer' for auto
+  lowpass_hz: 20            # upper bound of butterworth bandpass (for high frequent, e.g. electronic noise) [Hz]
+  highpass_hz: .8           # lower bound of butterworth bandpass (baseline drift noise) [Hz]
+  # Note: leave empty to skip either low/highpass filter
+  skip_calibration: False   # whether to skip gravity calibration (boolean)
+  skip_nonwear: False       # whether to skip non-wear detection (boolean)
+  skip_sleep: False         # whether to skip sleep segmentation (boolean)
+
+feature_kwargs:
+  mode: 'per_night'
+  filter_move_durations:   # whether to filter movement bout lengths before calculating
+    # features, must be tuple of bound in seconds to activate (tuple), e.g. [0.5, 50] to discard any movement shorter
+  # than 0.5 seconds or longer than 50 seconds.
+  create_cluster_plots: True

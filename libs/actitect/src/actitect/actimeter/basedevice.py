@@ -106,7 +106,7 @@ class BaseDevice(ABC):
             raise UserWarning(f"(io: {self.meta['patient_id']}) Failed to load raw data: {error_message}")
 
     def process(self, resample_rate: Union[int, str] = 'infer', lowpass_hz: float = None, highpass_hz: float = None,
-                skip_calibration: bool = False):
+                skip_calibration: bool = False, skip_nonwear: bool = False, skip_sleep: bool = False,):
         """ Run the pipeline to pre-process the raw recorded data based on the specified settings.
         Parameters:
             :param resample_rate: (int or 'infer'') If int, the target sample rate for resampling, if 'infer',the
@@ -114,6 +114,8 @@ class BaseDevice(ABC):
             :param lowpass_hz: (float) the upper cut-off frequency of the Butterworth filter in Hz. Set None to skip.
             :param highpass_hz: (float) the lower cut-off frequency of the Butterworth filter in Hz. Set None to skip.
             :param skip_calibration: (bool, Optional) If True, skip the auto-calibration.
+            :param skip_nonwear: (bool, Optional) If True, skip the non-wear segmentation.
+            :param skip_sleep: (bool, Optional) If True, skip the sleep segmentation.
         Returns:
             :return: (pd.DataFrame) the pre-processed data as pd.Dataframe with time-index and
                 columns 'x','y','z', 'wear' and 'sleep'. """
@@ -135,8 +137,10 @@ class BaseDevice(ABC):
             y_df = self._auto_calibrate(y_df)
 
         # 4. segment non-wear episodes and sleep windows:
-        y_df = self._infer_nonwear_segments(y_df)
-        y_df = self._segment_sleep_windows(y_df)
+        if not skip_nonwear:
+            y_df = self._infer_nonwear_segments(y_df)
+        if not skip_sleep:
+            y_df = self._segment_sleep_windows(y_df)
         # 5. applying a Butterworth highpass filter to remove gravity component:
         # (sleep/non-wear detection performs better this way around since
         # it requires axis-alignment information for z-angle)

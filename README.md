@@ -1,73 +1,122 @@
-# Boosting Neurodegenerative Disorder Screenings with Machine Learning 
+# ActiTect & RBDisco: Actigraphy Toolkit and RBD Prediction 
 
-This repository contains the code for the tool described in 'todo'.
+This repository hosts ActiTect, a general-purpose Python toolkit for actigraphy analysis(preprocessing,
+feature extraction, QC, and visualization), and RBDisco, an extension that provides reproducible pipelines and 
+pretrained models for RBD prediction from wrist actigraphy as described in: <mark>**TODO:URL**</mark>.
 
----
-## Overview
 <!-- [Introduction](#introduction)-->
-- [1. Installation](#1-installation)
-- [2. Usage](#2-usage)
-  - [2.1 Data Pre-Processing](#step-21-data-pre-processing)
-  - [2.1 RBD Prediction](#step-22-rbd-prediction)
----
-## 1. Installation
-### Step 1.1:  Create a Python 3.9 Environment
-- Option A: **Using Conda (recommended)**
-```
-conda create -n aktiRBD python=3.9
-conda activate aktiRBD
-```
-- Option B: **Using a Virtual Environment**
-```
-python3.9 -m venv aktiRBD
-# On macOS/Linux:
-source aktiRBD/bin/activate
-# On Windows:
-aktiRBD\Scripts\activate
-```
+- [Overview](#overview)
+- [Installation](#installation)
+- [ActiTect Usage](#actitect-usage-) ([CLI](#actitect-cli-usage-) / [API](#actitect-api-usage))
+- [RBDisco Usage](#rbdisco-usage)
+- [Citation](#citation)
 
-### Step 1.2: Clone the Repository
-Create a new folder for your experiments and download the codebase. 
-```
-mkdir aktiRBD_experiment
-cd aktiRBD_experiment 
-git clone git@github.com:db-2010/aktiRBD.git 
-cd aktiRBD
-```
+## Overview 
+<mark> TODO: quick summary of paper, and each tool and idea of usage.</mark>
 
-### Step 1.3: Install the Package
-Simply run `python install.py` to 
-1. check if OpenMP, a non-python multiprocessing dependency of XGBoost, is available and otherwise try to install it.
-2. Install the Python Package and dependencies from `pyproject.toml` using `pip`.
+## Installation
 
-after this , the output should look like
+You can install the package from source with
+```
+conda create -n actitect python=3.9  # use an venv instead if you dont use conda
+conda activate actitect
+mkdir actitect_experiment
+cd actitect_experiment 
+git clone git@github.com:db-2010/actitect.git
+```
+and then simply run 
+```
+python actitect/install.py       # for the full package, including RBDisco 
+or
+python actitect/install.py -c    # only the general purpose actigraphy toolkit 
+```
+*Note: The package might be published to PyPi in the future for a pip install.*
+
+after this, you should see
 ```
 ... 
-2025-03-10 17:11:22 [INFO] Verifying package installation...
-2025-03-10 17:11:22 [INFO] Installation successful!
+2025-10-02 12:34:17 [INFO] Installation successful!
 ```
 
----
-## 2. Usage
-The code is modular and has two entry points: i) `aktiRBD-preprocess` as a standalone tool for actigraphy data processing 
-and ii) `aktiRBD-analysis` for RBD prediction using the extracted nocturnal motion features. 
-### Step 2.0: File Organization
-To run the code, you need the raw actigraphy files and a `metadata.csv` file. 
-Supported formats for actigraphy binaries are
+## ActiTect Usage 
+You can use the general purpose actigraphy toolkit either as a CLI tool or directly via python as API.
+The supported actigraphy file formats are
 - **Axivity AX6:** `.cwa`
 - **GENEActiv:** `.bin`
 - **ActiGraph:** `.gt3x` 
 - **Generic:** `.csv` 
 
-**Note**: If your device is not natively supported, you can still load data by exporting it to `.csv` format first.
+<details>
+  <summary>Unsupported Devices (Generic CSV)</summary>
+   
+If your device is not natively supported, you can still use the tool by exporting to a generic `.csv` format first.
 The files must contain a column `time` that lists the sampling timestamps in `ISO8601 (%Y-%m-%dT%H:%M:%S.%f%z)` 
 format and columns `x, y, z` in units of g:
-```
+``` 
 time,x,y,z
 2023-07-03 15:00:03.699,0.5947265625,0.15283203125,0.742431640625
 2023-07-03 15:00:03.707763,0.59033203125,0.16357421875,0.74609375
 2023-07-03 15:00:03.715652,0.6279296875,0.136474609375,0.73046875
+...
 ```
+</details>
+
+### ActiTect CLI Usage 
+If you want to use ActiTect as a CLI tool,you can use
+```bash 
+actitect-process [-h] [-r ROOT_DIR] [-c CONFIG_FILE] [-d DATA_DIR] [-m META_FILE] [-o OUT_DIR] [-ns] [-cp] [-rp] [-sf]
+```
+to read and process an entire dataset under a given directory. The full processing includes uniform resampling,
+Butterworth bandpass filtering, auto-calibration, non-wear detection, sleep segmentation and 
+nocturnal movement feature calculation. 
+Please refer to `actitect-process --help` for all options, an overview of the important ones is given below.
+
+<details>
+  <summary>File organization options </summary>
+  <div id="actitect-file-org"></div>
+
+ - **`-d, --data_dir`** <br> 
+ **Description:** (str) The directory (relative to `root_dir`) that contains the raw actigraphy files. <br> 
+ **Default:** `./data/raw/` <br> 
+ **Note:** Only needed if binary files should be located outside the default directory. 
+- **`-m, --meta_file`** <br> 
+ **Description:** (str) The path to the metadata CSV file, relative to `root_dir`. <br> 
+ **Default:** `./data/meta/metadata.csv`<br>
+- **`-o, --out_dir`** <br>
+**Description:** (str) The directory where processed data and features will be stored.<br>
+**Default:** ./data/processed/ (relative to `root_dir`)<br>
+**Note:** By default, both the processed data and calculated features are stored,
+ refer to [Operational flags](#actitect-operational-flags) below to view file saving options.<br>
+</details>
+
+<details>
+  <summary>Operational flags </summary>
+  <div id="actitect-operational-flags"></div>
+
+Operational Flags:
+- **`-ns, --no_store`** <br>
+**Description:** When provided, the script saves only the calculated features and not the processed data.<br>
+**Default:** False. <br>
+**Note:** If flag is not activated,  the processed actigraphy data is stored as `.parquet` file. 
+(~2GB for a 7d recording at 100Hz.)
+- **`-cp, --create_plots`** <br>
+**Description:** Whether to create plots of the raw and processed actigraphy data.<br>
+**Default:** True. <br>
+- **`-sf, --skip_feature_calc`** <br>
+**Description:**  If enabled, will skip the calculation of motion features.<br>
+**Default:** False. <br>
+**Note:** Use this if you're only interested in the processing part.
+</details>
+  
+**Note:** You have full flexibility over the steps and parameters (e.g. bandpass 
+frequencies, skipping steps etc.), by providing a modified preprocessing config file (`-c`, the default/example 
+file can be found [here](./examples/actitect/cli_processing_settings.yaml)).
+
+#### Metadata File and Project Structure
+To successfully run the CLI command, you will need a `metadata.csv` file, linking each raw actigraphy file to your
+unique identifier, i.e. a patient ID or similar.
+<details>
+  <summary>metadata.csv format </summary>
 
 The `metadata.csv` file should have one row per subject/record and contain at least the columns 
 - ***filename:*** the filename of the actigraphy data.
@@ -88,91 +137,71 @@ e.g. 'RBD' for RBD diagnosed subject and 'HC' for neg.
 | 3   | `<name3b>.<cwa/bin/csv>` | `<ID-3>` | `right`   | `HC`      | `test`     |         |
 | ... | ...                      | ...      | ...       | ...       | ...        |
 
-**Note:** if the user is only interested in the preprocessing part of the pipeline, the columns ***diagnosis*** and 
+**Note:** if you are only interested in the preprocessing part of the pipeline, the columns ***diagnosis*** and 
 ***train/test*** are irrelevant and can be left empty. 
+</details>
 
-The default organization of the files is shown below. The binaries are simply listed under `./data/raw/` and the 
+Concerning file organization, you can either specify your desired paths via the [command line options](#actitect-file-org) 
+or use the default structure shown below.
+
+<details>
+  <summary>Default file organization  </summary>
+    <div id="default-file-org"></div>
+
+The actigraphy  binaries are listed under `./data/raw/` and the 
 metafile should be stored at `./data/raw/meta/metadata.csv`. 
-If different file locations are necessary, see [Step 2.1: Data Pre-Processing](#step-21-data-pre-processing).
+Processed data will be stored at `./data/processed/` and optionally the RBDisco results under  `./results/`.
 ```
-aktiRBD_experiment/ (the main folder of your experiment)  
-  ├── aktiRBD (the cloned repo)
+actitect_experiment/ (the main folder of your experiment)  
+  ├── actitect (the cloned repo)
   │     ├── README.md 
-  │     ├── src/ 
+  │     ├── libs/
   │     ├── ... 
   ├── data/ 
-  │     ├── raw/ (put your actipgraphy binaries here...)
+  │     ├── raw/ (put your actigraphy binaries here...)
   │     │    ├── <name1>.<cwa/bin/csv> 
   │     │    ├── <name2>.<cwa/bin/csv>
   │     │    ├── ...
-  │     │    ├── meta/  (...and don't foget the metadata file.)
-  │     │    │     ├── metadata.csv
+  │     ├── meta/  (...and don't foget the metadata file.)
+  │     │    ├── metadata.csv
   │     ├── processed/ (this is where the results of processing will be stored by default)
-  │     │    ├── <name2>/
+  │     │    ├── <ID1>/
   │     │    ├── ...
   │    ...  ...
-  ├── results/ (this is where results of the classifer will be stored by default)
+  ├── results/ (this is where results of RBDisco classifier will be stored by default)
  ... 
 ```
+</details>
 
-### Step 2.1: Data Pre-Processing
-This step reads in the binary data, performs preprocessing (uniform resampling, Butterworth bandpass filtering, 
-auto-calibration, non-wear detection, and sleep segmentation) and computes the nocturnal motion features for classification.
-If the files are located at the default positions as described above, you can simply run
-```bash 
-aktiRBD-preprocess 
+### ActiTect API Usage
+For users interested in only specific steps of the toolkit, they are accessible as a common Python package. For example, 
+
+<mark>TODO</mark>
+
+## RBDisco Usage
+To use RBDisco to make RBD status predictions for suited actigraphy files (see <mark>TODO</mark>), make sure you
+1. Installed the RBDisco extension of ActiTect (see [Installation](#installation))
+2. You've run a full processing on of you actigraphy files using the [ActiTect CLI](#actitect-cli-usage-),
+including the data preprocessing steps and feature extraction (default).
+
+and then run 
 ```
-with the default options. To see all available options, run `aktiRBD-preprocess --help`. The most important ones are
-
-File organization:
- - **`-d, --data_dir`** <br> 
- **Description:** (str) The directory (relative to `root_dir`) that contains the raw actigraphy files. <br> 
- **Default:** `./data/raw/` <br> 
- **Note:** Only needed if binary files should be located outside the default directory. 
-- **`-m, --meta_file`** <br> 
- **Description:** (str) The path to the metadata CSV file, relative to `root_dir`. <br> 
- **Default:** `./data/raw/meta/metadata.csv`<br>
-- **`-o, --out_dir`** <br>
-**Description:** (str) The directory where processed data and features will be stored.<br>
-**Default:** ./data/processed/ (relative to `root_dir`)<br>
-**Note:** By default, both the processed data and calculated features are stored. Use the next option to save only
-features if disk space is a concern.<br>
-
-Operational Flags:
-- **`-ns, --no_store`** <br>
-**Description:** When provided, the script saves only the calculated features and not the processed data.<br>
-**Default:** False. <br>
-**Note:** If flag is not activated,  the processed actigraphy data is stored as `.parquet` file. 
-(~2GB for a 7d recording at 100Hz.)
-- **`-cp, --create_plots`** <br>
-**Description:** Whether to create plots of the raw and processed actigraphy data.<br>
-**Default:** True. <br>
-- **`-sf, --skip_feature_calc`** <br>
-**Description:**  If enabled, will skip the calculation of motion features.<br>
-**Default:** False. <br>
-**Note:** Use this if you're only interested in the processing part.
-
-  
-**Note:** If you are only interested in the processing part and want flexibility concerning parameters like bandpass 
-frequencies etc., you can also provide a modified config file (`-c`, see `./config/preprocessing.yaml`).
-
-
----
-
-### Step 2.2. RBD Prediction
-To produce RBD predictions based on the extracted nocturnal motion features and the pretrained models, you can run
+actitect-rbdisco -d <path>/<to>/<processed>/<data>/<dir> -m <path>/<to>/<meta>/<file>
 ```
-aktiRBD-analysis -d <path>/<to>/<processed>/<data> -m <path>/<to>/<meta>/<file>
-```
-If you did not change the default paths in [Step 2.1: Data Pre-Processing](#step-21-data-pre-processing), you can omit the 
-extra options and simply call `aktiRBD-analysis`. For more details about available options, run
-`aktiRBD-analysis -h`. 
+If you did not change the [default paths](#default-file-org) in the [processing CLI](#actitect-cli-usage-), you can omit the 
+extra options and simply call `actitect-rbdisco`. Please refer to
+`aktiRBD-analysis -h` for more options.
 The results of the analysis will be stored under `./results/pipeline/run_<date_id>/` and consist of a `.csv` file 
 containing individual predictions and a `.json` file containing classification metrics. 
 
+<mark> TODO: it would actually make sense to provide a script that does processing and prediciton in one go!</mark>
+
+#### RBDisco API usage
+<mark> does it make sense to make a pyton api here?</mark>
+
 ---
 
-### Note on Reproducibility:
+### Note on Reproducibility
 The code is seeded, fully deterministic and reproducible. 
 However, there are some small platform dependencies linked to the RNG in XGBoost that lead to (small) variations
 if executed on different OS like Linux or macOS [
@@ -187,7 +216,7 @@ if executed on different OS like Linux or macOS [
 The only way to mitigate this is to match the C++ compilers used in both OS',
 e.g. by building XGBoost from source using GCC on macOS:
 ```
-conda activate aktiRBD_v2
+conda activate actitect
 brew install gcc@11  
 git clone https://github.com/dmlc/xgboost.git
 cd xgboost
@@ -201,6 +230,26 @@ cd ../python_package
 pip install . 
 ```
 --- 
-# Cite Us
+## Citation
+```
+@article{TODO,
+      title={TODO}, 
+      author={TODO},
+      year={TODO},
+      eprint={TODO},
+      archivePrefix={TODO},
+      primaryClass={TODO},
+      url={TODO}, 
+}
+```
 
-### todo 
+
+[![CC BY-NC-SA 4.0][cc-by-nc-sa-shield]][cc-by-nc-sa]
+
+[![CC BY-NC-SA 4.0][cc-by-nc-sa-image]][cc-by-nc-sa]
+
+[cc-by-nc-sa]: http://creativecommons.org/licenses/by-nc-sa/4.0/
+
+[cc-by-nc-sa-image]: https://licensebuttons.net/l/by-nc-sa/4.0/88x31.png
+
+[cc-by-nc-sa-shield]: https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg
