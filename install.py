@@ -145,6 +145,7 @@ def _prepare_pkg_docs(repo_root: Path):
     """Copy main README and license to each libs root dir. PEP 517 build regulations."""
     src_readme = repo_root / "README.md"
     src_license = repo_root / "LICENSE"
+    src_citation = repo_root / "CITATION.cff"
     pkg_dirs = [repo_root / "libs" / "actitect", repo_root / "libs" / "actitect-rbdisco"]
     for pkg in pkg_dirs:
         if pkg.exists():
@@ -152,6 +153,8 @@ def _prepare_pkg_docs(repo_root: Path):
                 shutil.copy2(src_readme, pkg / "README.md")
             if src_license.exists():
                 shutil.copy2(src_license, pkg / "LICENSE")
+            if src_citation.exists():
+                shutil.copy2(src_citation, pkg / "CITATION.cff")
 
 
 def main():
