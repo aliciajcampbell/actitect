@@ -1,21 +1,127 @@
-MIT License
+ACTITECT & RBDISCO LICENSE
+==========================
 
-Copyright (c) 2024 David Bertram
+Preamble
+--------
+This repository contains two kinds of artifacts:
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. Source code (Python modules, scripts, utilities)
+2. Pretrained models and weights (in `models/` and related directories)
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+These are governed by different licenses:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE
+- Code is licensed under the PolyForm Noncommercial License 1.0.0
+- Models are licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0)
+- Third-party dependencies (installed via PyPI) retain their own original licenses.
+
+Commercial use of either code or models is not permitted without explicit permission from the authors.
+
+
+----------------------------------------------------------------------
+Section A: Code License (PolyForm Noncommercial License 1.0.0)
+----------------------------------------------------------------------
+
+PolyForm Noncommercial License 1.0.0
+====================================
+
+Acceptance
+----------
+In order to get any license under these terms, you must agree
+to them as both strict obligations and conditions to all
+your licenses.
+
+Copyright License
+-----------------
+The licensor grants you a copyright license for the
+software to do everything you might do with the software
+that would otherwise infringe the licensor’s copyright
+in it for any permitted purpose. However, you may
+only distribute the software according to section 4.
+
+Noncommercial Purposes
+----------------------
+Any noncommercial purpose is a permitted purpose.
+Noncommercial purposes include research, teaching,
+personal projects, and experiments. The following are
+not noncommercial purposes under this license:
+
+- use of the software for a fee, revenue, or other
+  commercial consideration;
+- use of the software in work for which you are
+  compensated; or
+- use of the software in a commercial field of endeavor.
+
+Patent License
+--------------
+The licensor grants you a patent license for the software
+that covers patent claims the licensor can license, or
+becomes able to license, that you would infringe by using
+the software.
+
+Conditions
+----------
+You must:
+
+- ensure everyone who gets a copy of the software from you
+  agrees to the terms of this license,
+- not remove or alter any license notices in the software,
+- not misrepresent the origin of the software, and
+- not make any changes to the license text.
+
+Distribution
+------------
+You may not distribute the software.
+
+Notices
+-------
+You must ensure that anyone who gets a copy of any part of
+the software from you also gets a copy of these terms.
+
+No Other Rights
+---------------
+These terms do not allow you to sublicense or transfer any
+of your licenses.
+
+No Liability
+------------
+***As far as the law allows, the software comes as is, without
+any warranty or condition, and the licensor will not be
+liable to you for any damages arising out of these terms
+or the use or nature of the software, under any kind of
+legal claim.***
+
+Termination
+-----------
+If you violate any of these terms, or do anything with the
+software not covered by your licenses, all your licenses
+end immediately.
+
+
+----------------------------------------------------------------------
+Section B: Model License (CC BY-NC-SA 4.0)
+----------------------------------------------------------------------
+
+Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+=======================================================================
+
+You are free to:
+- **Share** — copy and redistribute the material in any medium or format
+- **Adapt** — remix, transform, and build upon the material
+
+Under the following terms:
+- **Attribution** — You must give appropriate credit, provide a link to the license, and indicate if changes were made.
+- **NonCommercial** — You may not use the material for commercial purposes.
+- **ShareAlike** — If you remix, transform, or build upon the material, you must distribute your contributions under the same license.
+
+Full license text: https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+
+
+----------------------------------------------------------------------
+Summary
+----------------------------------------------------------------------
+
+- Code: PolyForm Noncommercial License 1.0.0 (non-commercial use only)
+- Models: CC BY-NC-SA 4.0 (non-commercial use only, attribution + share-alike)
+- Dependencies: governed by their original licenses
+
+Commercial licensing requests should be directed to the authors.
