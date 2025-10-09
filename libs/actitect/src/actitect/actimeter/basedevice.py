@@ -3,28 +3,17 @@ import traceback
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Union
-from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from typing import Optional
 
-from .. import utils
+from .settings import ResolveNwSleepParams
 from .. import processing
+from .. import utils
 
-__all__ = ['BaseDevice', 'ResolveNwSleepParams']
+__all__ = ['BaseDevice']
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class ResolveNwSleepParams:
-    """Heuristic thresholds used to resolve potential ambiguities between detected non-wear and sleep."""
-    thres_non_wear_is_short: int = 4  # threshold for considering a non-wear period 'short' (in hours).
-    thres_onset: int = 4  # threshold for sleep onset at the start of recording (in hours).
-    thres_offset: int = 4  # threshold for sleep offset at the end of recording (in hours).
-    night_start: int = 22  # hour representing the start of the night period (24-hour format).
-    night_end: int = 9  # hour representing the end of the night period (24-hour format).
-    night_sptw_threshold_h: int = 4  # threshold for minimum sleep duration during the night (in hours).
-    night_sptw_duration_during_night_h: int = 2  # threshold for minimum overlap with night period (in hours).
 
 
 def _processing_step(step_name: str):
@@ -32,6 +21,7 @@ def _processing_step(step_name: str):
     of the BaseDevice class. All functions decorated with this should raise an Exception if the subprocess fails.
     Parameters:
         step_name (str): The name of the processing step, used for logging and updating processing_info."""
+
     def decorator(func):
         def wrapper(self, *args, **kwargs):
             processing_info = self.processing_info.get(step_name, {})
@@ -61,7 +51,14 @@ class BaseDevice(ABC):
     'load_raw_data' and 'process' for this purpose. Subclasses like e.g. AxivityAx6 or GENEActive must implement 
     the logic to parse the binary data in the abstract methods '__str__' and '_parse_binary_to_df'."""
 
-    def __init__(self, filepath: Path, patient_id: str, resolve_nw_params: ResolveNwSleepParams = None):
+    def __init__(
+            self,
+            filepath: Optional[Path],
+            patient_id: str,
+            resolve_nw_params: ResolveNwSleepParams = None,
+            raw_df: Optional[pd.DataFrame] = None,
+            header: Optional[dict] = None):
+
         self.raw_df = None
         self.meta = {'patient_id': patient_id, 'raw_data_loaded': False, 'processed_data': False}
         self.binary_header = {}
@@ -70,6 +67,10 @@ class BaseDevice(ABC):
                                 'sleep_nonwear_ambiguities': {}, 'sleep_movements': {}}
         self.resolve_nw_params = resolve_nw_params if resolve_nw_params is not None else ResolveNwSleepParams()
 
+        if raw_df is not None:
+            assert filepath is None, f"if 'raw_df' is provided, the 'filepath' must be None."
+            self.set_raw_data(raw_df, header=header)
+
     def load_raw_data(self, resolve_duplicates: bool = True, header_only: bool = False):
         """ Wrapper for the binary parser. Loads the raw data into time-indexed pd.DataFrame.
         Parameters:
@@ -77,8 +78,18 @@ class BaseDevice(ABC):
             :param header_only: (bool) if True, will only load the header from the binary, not the data.
         Returns:
             :return:  (pd.Dataframe): the raw data with columns 'x,'y', and 'z' (in units of g) """
-        assert Path(self.processing_info['loading']['filepath']).is_file(), \
-            f"(io: {self.meta['patient_id']}): File '{self.processing_info['loading']['filepath']}' not found."
+
+        fp = self.processing_info['loading'].get('filepath')
+        if self.meta['raw_data_loaded'] and not header_only:  # already loaded or preset, just return it
+            logger.info(f"(io: {self.meta['patient_id']}) using preloaded raw data.")
+            return self.raw_df
+        if header_only and self.binary_header:
+            logger.info(f"(io: {self.meta['patient_id']}) header already available (preloaded).")
+            return self.binary_header
+
+        # otherwise, we need a file
+        assert fp is not None and Path(fp).is_file(), f"(io: {self.meta['patient_id']}): File '{fp}' not found."
+
         try:
             with utils.Timer() as load_timer:
                 raw_df, header = self._parse_binary_to_df(header_only=header_only)
@@ -105,17 +116,41 @@ class BaseDevice(ABC):
             error_message = f"{type(e).__name__}: {e}"
             raise UserWarning(f"(io: {self.meta['patient_id']}) Failed to load raw data: {error_message}")
 
+    def set_raw_data(self, raw_df: pd.DataFrame, header: Optional[dict] = None, resolve_duplicates: bool = True):
+        """Inject a preloaded raw DataFrame (bypasses on-disk loading)."""
+        utils.assert_valid_df(raw_df)
+        if resolve_duplicates:
+            info_for_print = {'patient_id': self.meta['patient_id'], 'sample_rate': (header or {}).get('sample_rate')}
+            raw_df = utils.handle_duplicate_timestamps(raw_df, remove_dupes=True, **info_for_print)
+
+        is_uniform, mean_fs, std_fs = utils.infer_mean_sample_rate(raw_df)
+
+        self.raw_df = raw_df
+        self.binary_header = header or {}
+        if 'sample_rate' not in self.binary_header and mean_fs is not None:  # keep downstream logic happy
+            try:
+                self.binary_header['sample_rate'] = float(mean_fs)
+            except Exception:
+                pass
+
+        self.meta['raw_data_loaded'] = True
+        self.processing_info['resampling'].update({
+            'raw_fs_is_uniform': is_uniform,
+            'raw_fs_mean': mean_fs,
+            'raw_fs_std': std_fs,
+            'raw_num_ticks': raw_df.shape[0]})
+
     def process(self, resample_rate: Union[int, str] = 'infer', lowpass_hz: float = None, highpass_hz: float = None,
-                skip_calibration: bool = False, skip_nonwear: bool = False, skip_sleep: bool = False,):
+                calibrate: bool = False, detect_nonwear: bool = False, detect_sleep: bool = False):
         """ Run the pipeline to pre-process the raw recorded data based on the specified settings.
         Parameters:
             :param resample_rate: (int or 'infer'') If int, the target sample rate for resampling, if 'infer',the
             resample rate is inferred from the raw data. If None, resampling is skipped.
             :param lowpass_hz: (float) the upper cut-off frequency of the Butterworth filter in Hz. Set None to skip.
             :param highpass_hz: (float) the lower cut-off frequency of the Butterworth filter in Hz. Set None to skip.
-            :param skip_calibration: (bool, Optional) If True, skip the auto-calibration.
-            :param skip_nonwear: (bool, Optional) If True, skip the non-wear segmentation.
-            :param skip_sleep: (bool, Optional) If True, skip the sleep segmentation.
+            :param calibrate: (bool, Optional) If True, skip the auto-calibration.
+            :param detect_nonwear: (bool, Optional) If True, perform non-wear segmentation.
+            :param detect_sleep: (bool, Optional) If True, perform sleep segmentation.
         Returns:
             :return: (pd.DataFrame) the pre-processed data as pd.Dataframe with time-index and
                 columns 'x','y','z', 'wear' and 'sleep'. """
@@ -133,13 +168,13 @@ class BaseDevice(ABC):
             y_df = self._apply_butterworth_filter(y_df, {'lowcut': None, 'highcut': lowpass_hz}, 'lowpass')
 
         # 2. perform VanHees2014 'sphere' gravity calibration:
-        if not skip_calibration:
+        if calibrate:
             y_df = self._auto_calibrate(y_df)
 
         # 4. segment non-wear episodes and sleep windows:
-        if not skip_nonwear:
+        if detect_nonwear:
             y_df = self._infer_nonwear_segments(y_df)
-        if not skip_sleep:
+        if detect_sleep:
             y_df = self._segment_sleep_windows(y_df)
         # 5. applying a Butterworth highpass filter to remove gravity component:
         # (sleep/non-wear detection performs better this way around since
@@ -425,6 +460,9 @@ class BaseDevice(ABC):
         else:
             return self.raw_df
 
+    def get_info(self):
+        return {'meta': self.meta, 'header': self.binary_header, 'processing': self.processing_info}
+
     @abstractmethod
     def __str__(self):
         raise NotImplementedError
@@ -433,3 +471,10 @@ class BaseDevice(ABC):
     def _parse_binary_to_df(self):
         """Abstract method to parse the binary data from different devices and return it as a standardized DataFrame."""
         raise NotImplementedError
+
+    @classmethod
+    def from_dataframe(cls, raw_df: pd.DataFrame, patient_id: str, header: Optional[dict] = None,
+            resolve_nw_params: ResolveNwSleepParams = None):
+        inst = cls(filepath=None, patient_id=patient_id, resolve_nw_params=resolve_nw_params)
+        inst.set_raw_data(raw_df, header=header)
+        return inst

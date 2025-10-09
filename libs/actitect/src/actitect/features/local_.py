@@ -2,7 +2,6 @@
  Inputs are a pd.Series of the movement segment containing columns 'x', 'y', 'z' and 'mag' and a datetime index.
 Returns are dicts containing the feature name and value. """
 
-
 import gc
 import logging
 import warnings
@@ -16,9 +15,6 @@ import matplotlib.pyplot as plt
 from pyhrv.nonlinear import poincare
 from sklearn.exceptions import UndefinedMetricWarning
 
-
-
-
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -31,7 +27,6 @@ __all__ = [
     'non_linear_dynamic_features',
     'movement_duration',
     'poincare_features']
-
 
 NP_FLOAT_PRECISION = np.float64
 MIN_TIMESERIES_SAMPLES = 20

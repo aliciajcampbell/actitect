@@ -1,21 +1,23 @@
 """ Functions to generate descriptive motion features from time-series data."""
 
+import gc
 import logging
+from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import List, Dict, Any
+from typing import List, Any, Optional, Dict, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 
+from . import global_ as global_ff
+from . import local_ as local_ff
 from .. import utils
-from . import global_ as global_feats
-from . import local_ as local_feats
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['CalcLocalMoveFeatures', 'CalcGlobalMoveFeatures']
+__all__ = ['compute_sleep_features', 'compute_per_night_sleep_features']
 
 
 @dataclass
@@ -52,6 +54,7 @@ class CalcLocalMoveFeatures:
         """Helper function to get a complete list of the feature name strings."""
         _feature_func = None
         if self.mode == 'per_night':
+            self.sample_rate = self.sample_rate or 100  # set a dummy sample rate so downstream code won't break
             _feature_func = self.per_night_version
         else:
             raise ValueError(f"invalid 'mode' option: '{self.mode}'.")
@@ -84,26 +87,25 @@ class CalcLocalMoveFeatures:
                 f"input must be of type pd.Series or np.array, not {type(prop)}"
 
         feature_calls = {
-            'moments': dict(func=local_feats.moment_features, args=(acc_mag, acc_x, acc_y, acc_z), kwargs={}),
-            'quantiles': dict(func=local_feats.quantile_features, args=(acc_mag, acc_x, acc_y, acc_z), kwargs={}),
-            'energy': dict(func=local_feats.energy_features, args=(acc_mag, acc_x, acc_y, acc_z),
-                           kwargs={}),
-            'spectral': dict(func=local_feats.spectral_features, args=(acc_mag,), kwargs=dict(
+            'moments': dict(func=local_ff.moment_features, args=(acc_mag, acc_x, acc_y, acc_z), kwargs={}),
+            'quantiles': dict(func=local_ff.quantile_features, args=(acc_mag, acc_x, acc_y, acc_z), kwargs={}),
+            'energy': dict(func=local_ff.energy_features, args=(acc_mag, acc_x, acc_y, acc_z), kwargs={}),
+            'spectral': dict(func=local_ff.spectral_features, args=(acc_mag,), kwargs=dict(
                 n_dom_freqs=self.setup.SPECTRAL_N_DOM_FREQS,
                 target_frequencies_hz=self.setup.SPECTRAL_TARGET_FREQS, sample_rate=self.sample_rate)),
-            'auto_corr': dict(func=local_feats.autocorr_features, args=(acc_mag, acc_x, acc_y, acc_z), kwargs=dict(
+            'auto_corr': dict(func=local_ff.autocorr_features, args=(acc_mag, acc_x, acc_y, acc_z), kwargs=dict(
                 sample_rate=self.sample_rate, peak_prom_threshold=self.setup.AC_PEAK_PROM_THRESHOLD_AUTO_CORR)),
-            'peaks': dict(func=local_feats.peak_features, args=(acc_mag,), kwargs=dict(
+            'peaks': dict(func=local_ff.peak_features, args=(acc_mag,), kwargs=dict(
                 sample_rate=self.sample_rate, peak_prom_threshold=self.setup.PEAKS_PROM_THRESHOLD,
                 min_peak_distance=self.setup.PEAKS_MIN_DISTANCE)),
-            'nold': dict(func=local_feats.non_linear_dynamic_features, args=(acc_mag, acc_x, acc_y, acc_z),
+            'nold': dict(func=local_ff.non_linear_dynamic_features, args=(acc_mag, acc_x, acc_y, acc_z),
                          kwargs=dict(emb_dim=self.setup.NOLD_EMB_DIM)),
-            'poincare': dict(func=local_feats.poincare_features, args=(acc_mag,), kwargs={})}
+            'poincare': dict(func=local_ff.poincare_features, args=(acc_mag,), kwargs={})}
 
         local_features = {}
         for feature_name, spec in feature_calls.items():
             local_features.update(self._run_feature_func(
-                spec['func'], feature_name, self.setup.LOG_TIME_INFO_THRESHOLD_SEC,*spec['args'], **spec['kwargs']))
+                spec['func'], feature_name, self.setup.LOG_TIME_INFO_THRESHOLD_SEC, *spec['args'], **spec['kwargs']))
         return local_features
 
 
@@ -124,7 +126,7 @@ class CalcGlobalMoveFeatures:
 
         # cluster features:
         _debug = True if self.create_cluster_plots else False
-        cluster_feats, debug_info = global_feats.cluster_features(
+        cluster_feats, debug_info = global_ff.cluster_features(
             move_segments,
             kde_kwargs=self.setup.CLUSTER_KDE_KWARGS,
             peak_kwargs=self.setup.CLUSTER_PEAK_KWARGS_KDE,
@@ -173,9 +175,278 @@ class CalcGlobalMoveFeatures:
             plt.close()
 
         # moves per time:
-        global_features.update(global_feats.n_moves_per_time(move_segments))
+        global_features.update(global_ff.n_moves_per_time(move_segments))
 
         # move durations:
-        global_features.update(global_feats.movement_durations(move_segments))
+        global_features.update(global_ff.movement_durations(move_segments))
 
         return global_features
+
+
+def compute_sleep_features(
+        processed_df: pd.DataFrame,
+        selected_nights: pd.DataFrame,
+        move_bout_mask: pd.DataFrame,
+        move_bout_ids: pd.DataFrame,
+        *,
+        sample_rate: Optional[int] = None,
+        pbar: Optional = None,
+        info: Optional[Dict] = None,
+        sample_id: Optional[str] = None,
+        movement_duration_filters: Optional[Dict[str, Optional[Tuple[float, float]]]] = None,
+        draw_movement_cluster_plot: Optional[bool] = False,
+        subject_meta_dict: Optional[Dict] = None
+) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, Any], Dict[int, plt.Figure]]:
+    """Compute local and global sleep-related features from a processed actigraphy DataFrame.
+
+    Iterates over all selected nights (SPTWs), computes per-night (global) and per-movement
+    (local) features, optionally updates a progress bar, and returns the resulting feature
+    tables along with updated processing info and optional cluster plots.
+
+    Parameters;
+        :param processed_df: (pandas.DataFrame)
+            Processed actigraphy data containing columns such as 'wear', 'sptw', and 'movement'.
+        :param selected_nights: (pandas.DataFrame)
+            DataFrame of selected SPTWs (one row per night) as returned by `select_night_sptws`.
+        :param move_bout_mask: (pandas.DataFrame)
+            Mask labeling individual movement bouts across the recording.
+        :param move_bout_ids: (pandas.DataFrame)
+            Unique movement-bout identifiers corresponding to the mask.
+        :param sample_rate: (float, optional)
+            Sampling rate in Hz; inferred if None.
+        :param pbar: (tqdm object, optional)
+            Progress bar instance for progress tracking.
+        :param info: (dict, optional)
+            Metadata dictionary; updated in place with per-night movement counts.
+        :param sample_id: (str, optional)
+            Identifier used for logging and progress display.
+        :param movement_duration_filters: (Dict[local/global: tuple[float, float]], optional)
+            Duration filter for valid movement bouts in seconds. Contains a 'local' and 'global', key value pair,
+            where the value is either None (to skip the filter) or a tuple of floats, that represent the filter
+             boundaries in seconds.
+        :param draw_movement_cluster_plot: (bool, optional)
+            If True, generates and returns movement clustering plots per night.
+        :param subject_meta_dict: (dict, optional)
+            Subject-level metadata (keys: 'patient_id', 'record_id', 'diagnosis').
+
+    Returns:
+        :return: (tuple)
+            (1) local_feat_df (pandas.DataFrame): per-movement feature table,
+            (2) global_feat_df (pandas.DataFrame): per-night feature table,
+            (3) info (dict): updated processing information,
+            (4) cluster_plot_dict (dict[int, matplotlib.figure.Figure]):optional cluster plots, a dict with one
+                entry per night.
+    """
+    if movement_duration_filters is None:
+        movement_duration_filters = {'local': (.5, 50), 'global': None}
+    if not sample_rate:
+        is_uniform, sample_rate, _ = utils.infer_mean_sample_rate(processed_df)
+        if not is_uniform:
+            logger.warning(
+                "'compute_sleep_features' did not receive 'sample_rate' and inferred"
+                " sample rate from 'processed_df' is non uniform.")
+
+    cluster_plot_dict = {}
+    create_own_pbar = pbar is None
+    optional_pbar = utils.custom_tqdm(total=len(selected_nights)) if create_own_pbar else nullcontext(pbar)
+
+    with optional_pbar as pbar:
+        local_feat_df, global_feat_df = pd.DataFrame(), pd.DataFrame()
+        if create_own_pbar:
+            pbar.set_description(f"[PROGRESS]: Computing sleep features")
+        for night_idx, night_sptw in selected_nights.iterrows():  # loop over nights
+
+            # set pbar postfix
+            _postfix_dict = {'sample': f"{sample_id}"} if sample_id else {}
+            _postfix_dict.update({'night': f"{night_idx + 1}/{selected_nights.shape[0]}"})
+            pbar.set_postfix(_postfix_dict)
+
+            # select the subset of the data corresponding to the night
+            night_df = processed_df[
+                (processed_df.index >= night_sptw['start_time']) & (processed_df.index <= night_sptw['end_time'])]
+            move_bout_mask_night = move_bout_mask[
+                (move_bout_mask.index >= night_sptw['start_time']) & (move_bout_mask.index <= night_sptw['end_time'])]
+            move_bout_ids_night = move_bout_ids[
+                (move_bout_ids >= move_bout_mask_night.min()) & (move_bout_ids <= move_bout_mask_night.max())]
+            if info is not None:
+                info['processing']['sleep_movements'].update({f"n_moves_night_{night_idx}": len(move_bout_ids_night)})
+
+            if not len(move_bout_ids_night) > 10:
+                logger.warning(f"not enough movement episodes found in night {night_idx} from sample_id"
+                               f" {sample_id or 'none'} (n={len(move_bout_ids_night)}). Check for non-wear.")
+
+            else:
+                global_feats, cluster_plot = _compute_global_features_per_night(  # calc. global (per-night) features
+                    night_df, night_sptw, night_idx, filter_durations=movement_duration_filters['global'],
+                    create_cluster_plots=draw_movement_cluster_plot, subject_meta=subject_meta_dict)
+                cluster_plot_dict.update({night_idx: cluster_plot})
+
+                global_feat_df = pd.concat([global_feat_df, pd.DataFrame(global_feats, index=[night_idx])])
+                del global_feats
+                gc.collect()
+
+                # calculate local (per-move) features:
+                feat_names = CalcLocalMoveFeatures(mode='per_night', sample_rate=sample_rate).get_feature_names()
+                for idx, relevant_idx in enumerate(move_bout_ids_night):  # loop over movement bouts
+
+                    move_bout_df = night_df[move_bout_mask_night == relevant_idx]
+
+                    if move_bout_df.empty:
+                        logger.warning(f"move bouts not found in night_idx: {night_idx}, rel_idx: {relevant_idx}"
+                                       f"\n - ids: {move_bout_ids_night}"
+                                       f"\n - mask: {move_bout_mask_night}"
+                                       f"\n - episode: {move_bout_df}")
+
+                    local_feats = _compute_local_features_per_night(
+                        move_bout_df, relevant_idx, night_sptw, night_idx,
+                        filter_durations=movement_duration_filters['local'], feature_names=feat_names,
+                        sample_rate=sample_rate, subject_meta=subject_meta_dict)
+
+                    chunk = pd.DataFrame(local_feats, index=[idx])
+                    local_feat_df = pd.concat([local_feat_df, chunk], axis=0)
+
+                    _postfix_dict = {'sample': f"{sample_id}"} if sample_id else {}
+                    _postfix_dict.update({
+                        "night": f"{night_idx + 1}/{selected_nights.shape[0]} ",
+                        "features": f"{np.round((idx / len(move_bout_ids_night)) * 100, 1)}%"})
+                    pbar.set_postfix(_postfix_dict)
+
+                    del local_feats
+                    del move_bout_df
+                    gc.collect()
+
+            del night_df
+            del move_bout_ids_night
+            del move_bout_mask_night
+            gc.collect()
+
+            if create_own_pbar:
+                pbar.update(1)
+
+    return local_feat_df, global_feat_df, info or {}, cluster_plot_dict
+
+
+def compute_per_night_sleep_features(
+        processed_df: pd.DataFrame,
+        selected_nights: pd.DataFrame,
+        move_bout_mask: pd.DataFrame,
+        move_bout_ids: pd.DataFrame,
+        *,
+        sample_id: Optional[str] = None):
+    """Low-level helper to get merged global feature DataFrame."""
+    # calculate the features
+    local_feat_df, global_feat_df, _, _ = compute_sleep_features(
+        processed_df, selected_nights, move_bout_mask, move_bout_ids, sample_id=sample_id)
+
+    local_feat_df = utils.handle_problematic_values_in_feature_df(
+        local_feat_df, drop=True, replace=None, df_log_name='local_feat_df', excluded_cols=[
+            'id', 'record_id', 'diagnosis', 'time_start', 'time_end', 'time_diff', 'sptw_start',
+            'sptw_end', 'sptw_idx', 'night', 'runtime', 'ident'])
+
+    # aggregate local features to night-level
+    local_feat_names = CalcLocalMoveFeatures(mode='per_night', sample_rate=None).get_feature_names()
+    local_agg_to_global = utils.aggregate_local_feat_df_to_global(
+        local_feat_df, local_feature_base_names=local_feat_names)
+
+    # choose the best available join keys; fall back to 'night' if IDs are absent
+    candidate_keys = ['id', 'record_id', 'night']
+    on_keys = [k for k in candidate_keys if k in local_agg_to_global.columns and k in global_feat_df.columns]
+    if not on_keys:
+        on_keys = ['night']
+
+    # merge aggregated local with global per-night features
+    merged = pd.merge(
+        global_feat_df, local_agg_to_global,
+        on=on_keys, how='left', suffixes=('', '_dup')
+    )
+
+    # if any dup columns snuck in (rare), prefer non-NaN originals
+    for col in list(merged.columns):
+        if col.endswith('_dup'):
+            base = col[:-4]
+            if base in merged.columns:
+                merged[base] = merged[base].fillna(merged[col])
+            merged.drop(columns=[col], inplace=True)
+
+    front = [c for c in ['id', 'record_id', 'night', 'start_time', 'end_time'] if c in merged.columns]
+    merged = merged[front + [c for c in merged.columns if c not in front]]
+
+    return merged
+
+
+def _compute_global_features_per_night(
+        night_df: pd.DataFrame,
+        night_sptw: pd.DataFrame,
+        night_idx: int,
+        *,
+        filter_durations: Tuple[float, float],
+        create_cluster_plots: bool,
+        subject_meta: Optional[Dict]) -> pd.DataFrame:
+    subject_meta = subject_meta or {}
+    # get a representation as start, end, length where each row corresponds to one movement
+    night_move_segments = utils.extract_segments(night_df, 'movement', True, time_unit='s')
+
+    if isinstance(filter_durations, tuple):  # apply a duration filter to movement bouts if specified:
+        _low, _high = filter_durations
+        assert _low <= _high
+        logger.info(f"filtering movement durations: {_low}s <= t <= {_high}s")
+        night_move_segments = night_move_segments[
+            (night_move_segments['length(s)'] > _low) & (night_move_segments['length(s)'] < _high)]
+
+    with utils.Timer() as global_timer:  # calculate global features:
+        calc_global_move_features = CalcGlobalMoveFeatures(
+            night_move_segments, mode='per_night', create_cluster_plots=create_cluster_plots)
+        _global_feats = calc_global_move_features.features
+
+    sptw_duration = night_sptw['length(h)']
+    sleep_duration = (night_df.index.to_series().diff()[night_df['sleep_bout']] / pd.Timedelta(hours=1)).sum()
+    _global_feats['sleep_eff'] = sleep_duration / sptw_duration
+    _global_feats['waso'] = sptw_duration / sleep_duration
+    _global_feats['id'] = subject_meta.get('patient_id', 'none')
+    _global_feats['record_id'] = subject_meta.get('record_id', 'none')
+    _global_feats['diagnosis'] = subject_meta.get('diagnosis', 'none')
+    _global_feats['start_time'] = night_sptw['start_time']
+    _global_feats['end_time'] = night_sptw['end_time']
+    _global_feats['length(h)'] = night_sptw['length(h)']
+    _global_feats['sptw_idx'] = night_sptw['sptw_idx']
+    _global_feats['night'] = night_idx
+    _global_feats['runtime'] = global_timer()
+    del night_move_segments
+
+    return _global_feats, calc_global_move_features.cluster_fig or None
+
+
+def _compute_local_features_per_night(
+        move_bout_df: pd.DataFrame,
+        relevant_idx: int,
+        night_sptw: pd.DataFrame,
+        night_idx: int,
+        *,
+        filter_durations: Tuple[float, float],
+        feature_names: np.ndarray,
+        sample_rate: float,
+        subject_meta: Optional[Dict]) -> pd.DataFrame:
+    subject_meta = subject_meta or {}
+    with utils.Timer() as local_timer:
+        if not (int(filter_durations[0] * sample_rate)
+                <= move_bout_df.shape[0]
+                <= int(filter_durations[1] * sample_rate)):
+            logger.debug(f"timeseries too short/long: {relevant_idx} "
+                         f"({(move_bout_df.index[-1] - move_bout_df.index[0]).total_seconds():.3f}s)")
+            _local_feats = {_feat_name: np.NaN for _feat_name in feature_names}
+        else:  # calculate the movement features of each episode
+            _feature_generator = CalcLocalMoveFeatures('per_night', sample_rate)
+            _local_feats = _feature_generator.calc_features(move_bout_df)
+
+    _local_feats['id'] = subject_meta.get('patient_id', 'none')
+    _local_feats['record_id'] = subject_meta.get('record_id', 'none')
+    _local_feats['diagnosis'] = subject_meta.get('diagnosis', 'none')
+    _local_feats['time_start'] = move_bout_df.index[0]
+    _local_feats['time_end'] = move_bout_df.index[-1]
+    _local_feats['time_diff'] = (move_bout_df.index[-1] - move_bout_df.index[0]).total_seconds()
+    _local_feats['sptw_start'] = move_bout_df.sptw.iloc[0]
+    _local_feats['sptw_end'] = move_bout_df.sptw.iloc[0]
+    _local_feats['sptw_idx'] = night_sptw['sptw_idx']
+    _local_feats['night'] = night_idx
+    _local_feats['runtime'] = local_timer()
+    return _local_feats

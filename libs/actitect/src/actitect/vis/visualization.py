@@ -151,8 +151,11 @@ def draw_actigraphy_data(df: pd.DataFrame, _sleep_log: pd.DataFrame = None, raw_
     legend_patches = [mlines.Line2D([], [], visible=False, label='Legend:'),
                       mlines.Line2D([], [], color=Colors.x, lw=2, label=r'$\vec{a}_{x}$'),
                       mlines.Line2D([], [], color=Colors.y, lw=2, label=r'$\vec{a}_{y}$'),
-                      mlines.Line2D([], [], color=Colors.z, lw=2, label=r'$\vec{a}_{z}$'),
-                      mlines.Line2D([], [], color='k', lw=5, label=r'sleep log entry')]
+                      mlines.Line2D([], [], color=Colors.z, lw=2, label=r'$\vec{a}_{z}$')]
+    if isinstance(_sleep_log, pd.DataFrame):
+        if not _sleep_log.empty:
+            legend_patches.append(mlines.Line2D([], [], color='k', lw=5, label=r'sleep log entry'))
+
     if not raw_only:
         legend_patches.append(mlines.Line2D([], [], color=Colors.sptw, lw=5, alpha=.3, label=r'sleep window'))
         legend_patches.append(mlines.Line2D([], [], color=Colors.sb, lw=5, alpha=.5, label=r'sleep bout'))
@@ -173,7 +176,7 @@ def draw_actigraphy_data(df: pd.DataFrame, _sleep_log: pd.DataFrame = None, raw_
     # fig.tight_layout()
     del grouped_days
     del df
-    return fig
+    return fig, axes
 
 
 def draw_roc_or_pr_curve(x: np.ndarray, y: np.ndarray, thres: np.ndarray, mode: dict,

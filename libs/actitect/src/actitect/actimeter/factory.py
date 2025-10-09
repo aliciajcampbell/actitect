@@ -2,15 +2,17 @@ import logging
 from pathlib import Path
 from typing import Union
 
+import pandas as pd
+
 from .. import utils
-from .devices import ActiGraph, AxivityAx6, GenericCSV, GENEActiv
+from .devices import ActiGraph, AxivityAx6, Generic, GENEActiv
 
 __all__ = ['ActimeterFactory', 'SUPPORTED_FILETYPES']
 
 logger = logging.getLogger(__name__)
 
-EXT_2_DEVICE_MAP = {'.cwa': AxivityAx6, '.bin': GENEActiv, '.gt3x': ActiGraph, '.csv': GenericCSV}
-DEVICE_KWARGS_MAP = {AxivityAx6: {'legacy_mode'}, GENEActiv: set(), ActiGraph: set(), GenericCSV: set()}
+EXT_2_DEVICE_MAP = {'.cwa': AxivityAx6, '.bin': GENEActiv, '.gt3x': ActiGraph, '.csv': Generic}
+DEVICE_KWARGS_MAP = {AxivityAx6: {'legacy_mode'}, GENEActiv: set(), ActiGraph: set(), Generic: set()}
 SUPPORTED_FILETYPES = sorted(list(EXT_2_DEVICE_MAP.keys()))
 
 
@@ -20,18 +22,34 @@ class ActimeterFactory:
         - Axivity Ax6: .cwa files
         - GENEActiv: .bin files
         - Actigraph: .gt3x files
-        - GenericCSV: .csv files"""
+        - Generic: .csv files or preloaded DataFrames"""
 
-    def __new__(cls, file_path: Union[str, Path], patient_id: str, mute: bool = False, **kwargs):
+    def __new__(cls, data: Union[str, Path, pd.DataFrame], patient_id: str, mute: bool = False, **kwargs):
         """ Return an instance of the appropriate actimeter device subclass based on the file extension.
         Parameters:
-            :param file_path: (Union[str, Path]) The path to the data file for the actimeter device.
+            :param data: (Union[str, Path, DataFrame]) The path to the data file for the actimeter device, if a
+                DataFrame is provided, the preloaded data will be used, and we fall back to Generic device.
             :param patient_id: (str) The patient identifier associated with the actimeter data.
             :param mute: (bool, Optional) If True, mutes the logging. Defaults to False.
         Returns:
             :return: (BaseDevice) instance of base device su corresponding to given actimeter type."""
 
-        _ext = utils.get_file_extension(file_path)
+        if isinstance(data, pd.DataFrame):
+            device_class = Generic
+            valid_keys = DEVICE_KWARGS_MAP.get(device_class, set())
+            header = kwargs.pop('header', None)
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_keys}
+            if not mute:
+                logger.info(f"(io: {patient_id}) detected '{device_class.__name__}' device (preloaded DataFrame).")
+                ignored = set(kwargs) - valid_keys
+                if ignored:
+                    logger.warning(f"(io: {patient_id}) Ignored unsupported kwargs for "
+                                   f"{device_class.__name__}: {ignored}")
+
+            return device_class(
+                filepath=None, patient_id=patient_id, raw_df=data.copy(), header=header, **filtered_kwargs)
+
+        _ext = utils.get_file_extension(data)
         device_class = EXT_2_DEVICE_MAP.get(_ext)
 
         if device_class is None:
@@ -49,4 +67,4 @@ class ActimeterFactory:
                     logger.warning(f"(io: {patient_id}) Ignored unsupported kwargs for"
                                    f"{device_class.__name__}: {ignored}")
 
-            return device_class(file_path, patient_id, **filtered_kwargs)
+            return device_class(data, patient_id, **filtered_kwargs)

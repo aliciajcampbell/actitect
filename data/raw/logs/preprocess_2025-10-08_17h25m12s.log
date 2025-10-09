@@ -1,0 +1,9 @@
+(08.10 17:25:12) - [actitect.utils.logging_utils|CRITICAL]: Exception: Traceback (most recent call last):
+  File "/Users/david/anaconda3/envs/RBDisco/bin/actitect-process", line 7, in <module>
+    sys.exit(main())
+  File "/Users/david/Desktop/py_projects/aktiRBD_private/actitect/libs/actitect/src/actitect/cli.py", line 158, in main
+    config_params = utils.load_yaml_file(Path(args.root_dir).joinpath(args.config_file))
+  File "/Users/david/Desktop/py_projects/aktiRBD_private/actitect/libs/actitect/src/actitect/utils/io_utils.py", line 112, in load_yaml_file
+    with open(path, "r") as stream:
+FileNotFoundError: [Errno 2] No such file or directory: '/Users/david/Desktop/py_projects/aktiRBD_private/actitect/actitect/libs/actitect/src/actitect/config/default_preprocessing.yaml'
+

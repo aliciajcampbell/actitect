@@ -40,3 +40,4 @@ libs/actitect/src/actitect/config/experiment_root.local.json
 *.h5
 *.parquet
 *.back
+examples/actitect/*.cwa

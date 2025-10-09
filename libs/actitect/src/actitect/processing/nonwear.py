@@ -15,7 +15,7 @@ class NonWearParams:
 def segment_non_wear_episodes(data: pd.DataFrame, nw_params=NonWearParams()):
     """ Detect nonwear episodes based on long periods of stationary recordings.
     Parameters:
-           :param data: (pd.DataFrame)  containing the acceleration time-series. It must contain at least columns
+           :param data: (pd.DataFrame) containing the acceleration time-series. It must contain at least columns
             `x,y,z` and the index must be a DateTimeIndex.
         :param nw_params: (NonWearParams) see NonWearParams dataclass for details.
     Returns:

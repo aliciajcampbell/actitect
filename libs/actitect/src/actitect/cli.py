@@ -91,7 +91,7 @@ def _parse_args():
 
     parser.add_argument(
         '-c', '--config_file', type=str,
-        default='./ActiTect/libs/actitect/src/actitect/config/default_preprocessing.yaml',
+        default='./actitect/libs/actitect/src/actitect/config/default_preprocessing.yaml',
         help='Location of the config .yaml file that defines preprocessing settings.'
     )
 
@@ -143,7 +143,7 @@ def _parse_args():
     parser.add_argument(
         '--ax6_legacy_mode', action='store_true', default=False,
         help='Earlier Ax6 parsing code from Openmovement i used had some issues with duplicate timestamps and '
-             'checksums.Use this flag to reproduce this behavior.'
+             'checksums.Use this flag to reproduce this behavior to repdruce results.'
     )
 
     return parser.parse_args()

@@ -3,9 +3,9 @@ processing_kwargs:
   lowpass_hz: 20            # upper bound of butterworth bandpass (for high frequent, e.g. electronic noise) [Hz]
   highpass_hz: .8           # lower bound of butterworth bandpass (baseline drift noise) [Hz]
   # Note: leave empty to skip either low/highpass filter
-  skip_calibration: False   # whether to skip gravity calibration (boolean)
-  skip_nonwear: False       # whether to skip non-wear detection (boolean)
-  skip_sleep: False         # whether to skip sleep segmentation (boolean)
+  calibrate: True            # whether to perform gravity calibration (boolean)
+  detect_nonwear: True       # whether to perform non-wear detection (boolean)
+  detect_sleep: True         # whether to perform sleep segmentation (boolean)
 
 feature_kwargs:
   mode: 'per_night'

@@ -10,7 +10,7 @@ import pandas as pd
 
 from ..basedevice import BaseDevice
 
-from ..devices._actigraph_dtypes import LogRecordV1, LogRecordV2
+from ..settings import ActiGraphLogRecordV1, ActiGraphLogRecordV2
 
 __all__ = ['ActiGraph']
 
@@ -28,12 +28,12 @@ class ActiGraph(BaseDevice):  # noqa
         self.device_header = None
 
         if self.is_in_nhanes_format:
-            self.LogRecord = LogRecordV1
+            self.LogRecord = ActiGraphLogRecordV1
             raise NotImplementedError(  # todo: eventually add NHANES support if needed
                 "Detected device is in deprecated v1 (NHANES) format, i.e., does not contain the 'log.bin' file. "
                 "Support may be added in the future.")
         else:
-            self.LogRecord = LogRecordV2
+            self.LogRecord = ActiGraphLogRecordV2
 
         self._assert_ism_was_disabled()
 
@@ -63,7 +63,7 @@ class ActiGraph(BaseDevice):  # noqa
 
             with self.zip_file.open(self.LogRecord.DATA_STREAM_FILE_NAME) as binary_stream:
                 while True:
-                    record, decoded = LogRecordV2.from_stream(binary_stream)
+                    record, decoded = ActiGraphLogRecordV2.from_stream(binary_stream)
                     if record is None:
                         break
 
@@ -309,7 +309,7 @@ class ActiGraph(BaseDevice):  # noqa
         try:
             with self.zip_file.open("log.bin") as stream:
                 while True:
-                    record, decoded = LogRecordV2.from_stream(stream)
+                    record, decoded = ActiGraphLogRecordV2.from_stream(stream)
                     if record is None:
                         break  # EOF
 

@@ -118,7 +118,7 @@ def _resolve_repo_root() -> Path:
 
 def _set_experiment_root(repo_root: Path):
     """Experiment root which will be used for default data paths."""
-    _exp_root = repo_root.resolve()
+    _exp_root = repo_root.parent.resolve()
     cfg_dir = repo_root / 'libs' / 'actitect' / 'src' / 'actitect' / 'config'
     local_root_json = cfg_dir / 'experiment_root.local.json'  # untracked local sidecar
     try:

@@ -7,11 +7,12 @@ import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
 
-from ..utils import dict_minus_key
+from .. import utils
+from ..actimeter.settings import ResolveNwSleepParams
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['SleepDetector']
+__all__ = ['SleepDetector', 'select_night_sptws', 'filter_sptws']
 
 
 @dataclass(frozen=True)
@@ -42,7 +43,8 @@ class SleepDetector:
     - Beyer, K.B., Weber, K.S., Cornish, B.F. et al. NiMBaLWear analytics pipeline for wearable sensors: a modular,
       open-source platform for evaluating multiple domains of health and behaviour.
       BMC Digit Health 2, 8 (2024). https://doi.org/10.1186/s44247-024-00062-3 """
-    def __init__(self, sleep_params: Optional[SleepParams] = None): 
+
+    def __init__(self, sleep_params: Optional[SleepParams] = None):
         self.sleep_params = sleep_params if sleep_params else SleepParams()
         self.sample_rate = None
 
@@ -291,7 +293,7 @@ class SleepDetector:
             sptws['waso'] = np.round(stats['waso'].values, 4)
             info.update({'num_sleep_bouts': sleep_bouts.shape[0]})
 
-        sptw_dict = dict_minus_key(sptws.to_dict(), ['relative_date', 'sptw_num'])
+        sptw_dict = utils.dict_minus_key(sptws.to_dict(), ['relative_date', 'sptw_num'])
         info.update({'sptws': {index: {key: value_list[index] for key, value_list in sptw_dict.items()
                                        if index in value_list} for index in sptw_dict['start_time'].keys()}})
         sptws['length(h)'] = \
@@ -353,3 +355,55 @@ class SleepDetector:
             sleep_stats['waso'].append(waso / 60)
 
         return pd.DataFrame(sleep_stats).set_index('sptw_num')
+
+
+def select_night_sptws(processed_df: pd.DataFrame, params: ResolveNwSleepParams = None) -> pd.DataFrame:
+    """ Helper to select SPTWs that qualify as a night of sleep, using heuristic thresholds.
+    Parameters
+        :param processed_df: (pandas.DataFrame)
+        :param params: (actitect.actimeter.basedevice.ResolveNwSleepParams)
+    Returns
+        :return: (pandas.DataFrame) index is 'night' and each row corresponds to a night sptw."""
+    params = params or ResolveNwSleepParams()
+
+    sptws = utils.extract_segments(  # get sptw segments: (start, end, length)
+        processed_df, column='sptw', condition=True, add_during_night_indicator=True,
+        night_start=params.night_start, night_end=params.night_end,
+        during_night_h_thres=params.night_sptw_duration_during_night_h)
+
+    # select only sptws that correspond to nights: (i.e. begin/end in typical night window and long enough)
+    sptws['selected'] = sptws.apply(
+        lambda row: True if (row['during_night'] and row['length(h)'] > params.night_sptw_threshold_h) else False,
+        axis=1)
+    selected_sptws = sptws[sptws.selected].reset_index().rename(columns={'index': 'sptw_idx'})
+    selected_sptws.index.name = 'night'
+    del sptws
+    return selected_sptws
+
+
+def filter_sptws(processed_df: pd.DataFrame, *, sptw_col: str = 'sptw', sleep_col: str = 'sleep_bout',
+                 inplace: bool = False) -> pd.DataFrame:
+    """ Constrain boolean masks 'sptw' and 'sleep_bout' to be True only within SPTWs
+    that qualify as selected nights. """
+    assert utils.df_is_processed_and_valid(processed_df), (
+        f"Invalid input DataFrame: expected processed actigraphy data with columns "
+        f"{utils.PROCESSED_REQUIRED_COLS}; missing {tuple(utils.missing_processed_columns(processed_df))}."
+        f" Run actitect.api.process(...) first."
+    )
+    for col in (sptw_col, sleep_col):
+        if col not in processed_df.columns:
+            raise KeyError(f"Required column '{col}' not found in processed_df.")
+
+    selected_nights = select_night_sptws(processed_df)
+    df = processed_df if inplace else processed_df.copy()
+
+    # Build a single boolean mask covering all selected SPTW intervals
+    mask_selected = pd.Series(False, index=df.index)
+    for _, row in selected_nights.iterrows():
+        mask_selected |= (df.index >= row['start_time']) & (df.index <= row['end_time'])
+
+    # Constrain masks to selected nights only
+    df[sptw_col] = df[sptw_col] & mask_selected
+    df[sleep_col] = df[sleep_col] & mask_selected
+
+    return df

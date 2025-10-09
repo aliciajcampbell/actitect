@@ -1,31 +1,39 @@
 import logging
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 
 from ... import utils
 from ..basedevice import BaseDevice
 
-__all__ = ['GenericCSV']
+__all__ = ['Generic']
 
 logger = logging.getLogger(__name__)
 
 
-class GenericCSV(BaseDevice):
-    """ Subclass of BaseDevice to load data from device-agnostic CSV files. The csv file must have a header with columns
-     'time' and 'x', 'y', 'z'. The 'time' column should be formatted according to ISO 8601 (%Y-%m-%dT%H:%M:%S.%f%z) and
-     the data columns should be numeric in units of g."""
+class Generic(BaseDevice):
+    """ Subclass of BaseDevice to load data from device-agnostic CSV files or a preloaded pandas.DataFrame.
+     The csv file/Dataframe must have a header with columns 'time' and 'x', 'y', 'z'. The 'time' column should be
+      formatted according to ISO 8601 (%Y-%m-%dT%H:%M:%S.%f%z) and the data columns should be numeric in units of g."""
 
-    def __init__(self, path_to_csv: Path, patient_id: str):
-        super().__init__(filepath=path_to_csv, patient_id=patient_id)
+    def __init__(
+            self,
+            filepath: Optional[Path],
+            patient_id: str,
+            *,
+            raw_df: Optional[pd.DataFrame] = None,
+            header: Optional[dict] = None,
+    ):
+        super().__init__(filepath=filepath, patient_id=patient_id, raw_df=raw_df, header=header)
 
     def __str__(self):
-        return f"GenericCSV(patient_ID='{self.meta['patient_id']}')"
+        return f"Generic(patient_ID='{self.meta['patient_id']}')"
 
     def _parse_binary_to_df(self, resolve_duplicates: bool = True, header_only: bool = False):
         logger.info(f"(io: {self.meta['patient_id']}) loading from '{self.processing_info['loading']['filepath']}'.")
         if header_only:
-            raise ValueError("'header_only' is not supported for GenericCSV device.")
+            raise ValueError("'header_only' is not supported for Generic device.")
         else:
 
             try:

@@ -18,7 +18,7 @@ pretrained models for RBD prediction from wrist actigraphy as described in: <mar
 
 You can install the package from source with
 ```
-conda create -n actitect python=3.9  # use an venv instead if you dont use conda
+conda create -n actitect python=3.9  # use an venv instead if you dont run conda
 conda activate actitect
 mkdir actitect_experiment
 cd actitect_experiment 
@@ -30,7 +30,7 @@ python actitect/install.py       # for the full package, including RBDisco
 or
 python actitect/install.py -c    # only the general purpose actigraphy toolkit 
 ```
-*Note: The package might be published to PyPi in the future for a pip install.*
+*Note: The package might be published to PyPi in the future for a pure pip install.*
 
 after this, you should see
 ```
@@ -174,14 +174,18 @@ actitect_experiment/ (the main folder of your experiment)
 </details>
 
 ### ActiTect API Usage
-For users interested in only specific steps of the toolkit, they are accessible as a common Python package. For example, 
+For users interested in only specific steps of the toolkit, they are accessible as a common Python package. The API contains
+ - `actitect.api.load()`: load data of any supported device into memory.
+ - `actitect.api.process()`: process the data, including preprocessing and non-wear/sleep detection.
+ - `actitect.api.plot()`: visualize raw or processed actigraphy data.
+ - `actitect.api.compute_per_night_sleep_features()`: compute numerical descriptors of sleep motion patterns.
 
-<mark>TODO</mark>
+For a detailed example on how to use each step, see this [example notebook](examples/actitect/api_example.py.ipynb).
 
 ## RBDisco Usage
 To use RBDisco to make RBD status predictions for suited actigraphy files (see <mark>TODO</mark>), make sure you
 1. Installed the RBDisco extension of ActiTect (see [Installation](#installation))
-2. You've run a full processing on of you actigraphy files using the [ActiTect CLI](#actitect-cli-usage-),
+2. You've run a full processing of your actigraphy files using the [ActiTect CLI](#actitect-cli-usage-),
 including the data preprocessing steps and feature extraction (default).
 
 and then run 
@@ -244,12 +248,8 @@ pip install .
 ```
 
 
-[![CC BY-NC-SA 4.0][cc-by-nc-sa-shield]][cc-by-nc-sa]
-
-[![CC BY-NC-SA 4.0][cc-by-nc-sa-image]][cc-by-nc-sa]
-
-[cc-by-nc-sa]: http://creativecommons.org/licenses/by-nc-sa/4.0/
-
-[cc-by-nc-sa-image]: https://licensebuttons.net/l/by-nc-sa/4.0/88x31.png
-
-[cc-by-nc-sa-shield]: https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg
+<p align="center">
+  <a href="https://polyformproject.org/licenses/noncommercial/1.0.0/"><img src="https://img.shields.io/badge/License-PolyForm--NC%201.0.0-blue.svg" alt="License: PolyForm-NC 1.0.0"></a>
+  &nbsp;
+  <a href="http://creativecommons.org/licenses/by-nc-sa/4.0/"><img src="https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg" alt="CC BY-NC-SA 4.0"></a>
+</p>

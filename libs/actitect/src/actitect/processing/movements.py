@@ -1,10 +1,14 @@
 import datetime
+import logging
 from contextlib import contextmanager
+from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
 
 from ..utils import df_astype_inplace
+
+logger = logging.getLogger(__name__)
 
 __all__ = ['segment_nocturnal_movements']
 
@@ -33,7 +37,7 @@ def segment_nocturnal_movements(x_df: pd.DataFrame, selected_sptws: pd.DataFrame
     # check for movements in sleep (= simply defined as current acceleration > mean acceleration ± std)
     # if True, set movement to True, otherwise NaN (not False, see ffill(), bfill())
     x_df['movement'] = \
-        np.where((x_df['mag'] > move_threshold) & (x_df['sptw'] & x_df['wear'] & time_window_mask), 1, np.NaN,)
+        np.where((x_df['mag'] > move_threshold) & (x_df['sptw'] & x_df['wear'] & time_window_mask), 1, np.NaN, )
     # calculate time difference between movements=True:
     with time_to_integer_index(x_df):
         time_diff = x_df.loc[x_df.movement == 1, 'time'].diff()

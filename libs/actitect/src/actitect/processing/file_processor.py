@@ -1,25 +1,25 @@
 import gc
 import json
 import logging
-from pathlib import Path
 from argparse import Namespace
-
+from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import pyarrow
 import pyarrow.parquet as parquet
 
 from .movements import segment_nocturnal_movements
 from .. import utils
-from ..features import CalcLocalMoveFeatures, CalcGlobalMoveFeatures
+from ..features import compute_sleep_features
+from ..processing.sleep import select_night_sptws
 from ..vis import draw_actigraphy_data
-if TYPE_CHECKING:
-    from ..actimeter.basedevice import ResolveNwSleepParams
 
-MIN_LOCAL_SAMPLE_LENGTH_SECONDS = 0.5
+if TYPE_CHECKING:
+    from ..actimeter.settings import ResolveNwSleepParams
+
+MIN_LOCAL_SAMPLE_LENGTH_SECONDS = .5
 MAX_LOCAL_SAMPLE_LENGTH_SECONDS = 50
 
 logger = logging.getLogger(__name__)
@@ -173,7 +173,7 @@ class FileProcessor:
             utils.check_make_dir(self.recording_save_dir, use_existing=True)
             processed_df = actimeter.process(**self.process_kwargs)
 
-            info = {'meta': actimeter.meta, 'header': actimeter.binary_header, 'processing': actimeter.processing_info}
+            info = actimeter.get_info()
             if self.save_processed_data:
                 parquet.write_table(pyarrow.Table.from_pandas(processed_df), self.parquet_path, compression='snappy')
                 utils.dump_to_json(info, self.recording_save_dir.joinpath(f"info-{self.saving_suffix}.json"))
@@ -183,7 +183,7 @@ class FileProcessor:
         return processed_df, info
 
     def _segment_nocturnal_movements(self, processed_df: pd.DataFrame, params: Optional['ResolveNwSleepParams'] = None):
-        from ..actimeter.basedevice import ResolveNwSleepParams
+        from ..actimeter.settings import ResolveNwSleepParams
 
         params = params if params else ResolveNwSleepParams()
 
@@ -192,18 +192,7 @@ class FileProcessor:
             processed_df, column='wear', condition=False, add_during_night_indicator=True,
             night_start=params.night_start, night_end=params.night_end, during_night_h_thres=.1)
 
-        # get sptw segments: (start, end, length)
-        sptws = utils.extract_segments(
-            processed_df, column='sptw', condition=True, add_during_night_indicator=True,
-            night_start=params.night_start, night_end=params.night_end,
-            during_night_h_thres=params.night_sptw_duration_during_night_h)
-
-        # select only sptws that correspond to nights: (i.e. begin/end in typical night window and long enough)
-        sptws['selected'] = sptws.apply(
-            lambda row: True if (row['during_night'] and row['length(h)'] > params.night_sptw_threshold_h) else False,
-            axis=1)
-        selected_sptws = sptws[sptws.selected].reset_index().rename(columns={'index': 'sptw_idx'})
-        selected_sptws.index.name = 'night'
+        selected_sptws = select_night_sptws(processed_df, params=params)
         logger.info(f"({self.saving_suffix}) found {selected_sptws.shape[0]} full nights of sleep in data.")
 
         # mask the movement bouts:
@@ -221,7 +210,6 @@ class FileProcessor:
             for index in range(len(next(iter(selected_sptw_dict.values()))))}})
         self.info['processing']['non-wear'].update({'final_segments': non_wears.to_dict()})
 
-        del sptws
         del non_wears
         gc.collect()
         return selected_sptws, move_segment_mask, move_segment_ids
@@ -230,128 +218,32 @@ class FileProcessor:
                             _move_bout_mask: pd.DataFrame, _move_bout_ids: pd.DataFrame):
 
         sample_rate = self._get_final_sample_rate()
-        local_feat_df, global_feat_df = pd.DataFrame(), pd.DataFrame()
-        for night_idx, night_sptw in _selected_nights.iterrows():  # loop over nights
-            if self.pbar:
-                self.pbar.set_postfix(
-                    {"file": f"{self.saving_suffix}", "night": f"{night_idx + 1}/{_selected_nights.shape[0]}"})
+        meta_dict = {'patient_id': self.patient_id, 'record_id': self.record_id if self.record_id else 'none',
+                     'diagnosis': self.label}
 
-            # select the subset of the data corresponding to the night
-            night_df = _processed_df[(_processed_df.index >= night_sptw['start_time'])
-                                     & (_processed_df.index <= night_sptw['end_time'])]
-            move_bout_mask_night = _move_bout_mask[(_move_bout_mask.index >= night_sptw['start_time'])
-                                                   & (_move_bout_mask.index <= night_sptw['end_time'])]
-            move_bout_ids_night = _move_bout_ids[(_move_bout_ids >= move_bout_mask_night.min())
-                                                 & (_move_bout_ids <= move_bout_mask_night.max())]
-            self.info['processing']['sleep_movements'].update({f"n_moves_night_{night_idx}": len(move_bout_ids_night)})
+        move_duration_filters = {
+            'local': (MIN_LOCAL_SAMPLE_LENGTH_SECONDS, MAX_LOCAL_SAMPLE_LENGTH_SECONDS),  # always apply to locals
+            'global': self.feat_kwargs.get('filter_move_durations', None)  # restore conditional legacy behavior
+        }
 
-            if not len(move_bout_ids_night) > 10:
-                logger.warning(f"not enough movement episodes found in {self.saving_suffix} night {night_idx}"
-                               f"(n={len(move_bout_ids_night)}). Check for non-wear.")
+        local_feat_df, global_feat_df, updated_info, cluster_plots = compute_sleep_features(
+            _processed_df, _selected_nights, _move_bout_mask, _move_bout_ids,
+            sample_rate=sample_rate, pbar=self.pbar, info=self.info, sample_id=self.saving_suffix,
+            movement_duration_filters=move_duration_filters,
+            draw_movement_cluster_plot=self.feat_kwargs['create_cluster_plots'], subject_meta_dict=meta_dict)
 
-            else:
-                if self.feat_kwargs['mode'] == 'per_night':  # calc. global (per-night) features
-                    global_feats = self._calc_global_features(night_df, night_sptw, night_idx)
-                    global_feat_df = pd.concat([global_feat_df, pd.DataFrame(global_feats, index=[night_idx])])
-                    del global_feats
-                    gc.collect()
+        if updated_info is not None and updated_info is not self.info:  # safely update info
+            self.info.clear()
+            self.info.update(updated_info)
 
-                # calculate local (per-move) features:
-                feat_names = CalcLocalMoveFeatures(self.feat_kwargs['mode'], sample_rate).get_feature_names()
-                for idx, relevant_idx in enumerate(move_bout_ids_night):  # loop over movement bouts
-
-                    move_bout_df = night_df[move_bout_mask_night == relevant_idx]
-
-                    if move_bout_df.empty:
-                        logger.warning(f"move bouts not found in night_idx: {night_idx}, rel_idx: {relevant_idx}"
-                                       f"\n - ids: {move_bout_ids_night}"
-                                       f"\n - mask: {move_bout_mask_night}"
-                                       f"\n - episode: {move_bout_df}")
-
-                    local_feats = self._calc_local_features(
-                        move_bout_df, relevant_idx, night_sptw, night_idx, feat_names, sample_rate)
-                    local_feat_df = pd.concat([local_feat_df, pd.DataFrame(local_feats, index=[idx]).astype(object)])
-                    if self.pbar:
-                        self.pbar.set_postfix({"file": f"{self.saving_suffix}",
-                                               "night": f"{night_idx + 1}/{_selected_nights.shape[0]} ",
-                                               "features": f"{np.round((idx / len(move_bout_ids_night)) * 100, 1)}%"})
-                    del local_feats
-                    del move_bout_df
-                    gc.collect()
-
-            del night_df
-            del move_bout_ids_night
-            del move_bout_mask_night
-            gc.collect()
+        if cluster_plots:  # none empty dict
+            _cluster_dir = utils.check_make_dir(
+                self.recording_save_dir.joinpath(f"move_clusters/"), True, verbose=False)
+            for night_idx, fig in cluster_plots.items():
+                fig.savefig(
+                    _cluster_dir.joinpath(f"clusters-{self.saving_suffix}-night{night_idx}.png"), bbox_inches='tight')
 
         return local_feat_df, global_feat_df
-
-    def _calc_global_features(self, _night_df: pd.DataFrame, _night_sptw: pd.DataFrame, _night_idx: int):
-
-        # get a representation as start, end, length where each row corresponds to one movement
-        night_move_segments = utils.extract_segments(_night_df, 'movement', True, time_unit='s')
-
-        # apply a duration filter if specified:
-        if isinstance(self.feat_kwargs['filter_move_durations'], tuple):
-            _low, _high = self.feat_kwargs['filter_move_durations']
-            logger.info(f"filtering movement durations: {_low}s <= t <= {_high}s")
-            night_move_segments = night_move_segments[(night_move_segments['length(s)'] > _low)
-                                                      & (night_move_segments['length(s)'] < _high)]
-
-        with utils.Timer() as global_timer:  # calculate global features:
-            calc_global_move_features = CalcGlobalMoveFeatures(night_move_segments, self.feat_kwargs['mode'],
-                                                               self.feat_kwargs['create_cluster_plots'])
-            _global_feats = calc_global_move_features.features
-
-            if isinstance(calc_global_move_features.cluster_fig, plt.Figure):
-                _cluster_dir = utils.check_make_dir(
-                    self.recording_save_dir.joinpath(f"move_clusters/"), True, verbose=False)
-                calc_global_move_features.cluster_fig.savefig(
-                    _cluster_dir.joinpath(f"clusters-{self.saving_suffix}-night{_night_idx}.png"), bbox_inches='tight')
-
-        sptw_duration = _night_sptw['length(h)']
-        sleep_duration = (_night_df.index.to_series().diff()[_night_df['sleep_bout']] / pd.Timedelta(hours=1)).sum()
-        _global_feats['sleep_eff'] = sleep_duration / sptw_duration
-        _global_feats['waso'] = sptw_duration / sleep_duration
-        _global_feats['id'] = self.patient_id
-        _global_feats['record_id'] = self.record_id if self.record_id else 'none'
-        _global_feats['diagnosis'] = self.label
-        _global_feats['start_time'] = _night_sptw['start_time']
-        _global_feats['end_time'] = _night_sptw['end_time']
-        _global_feats['length(h)'] = _night_sptw['length(h)']
-        _global_feats['sptw_idx'] = _night_sptw['sptw_idx']
-        _global_feats['night'] = _night_idx
-        _global_feats['runtime'] = global_timer()
-        del night_move_segments
-
-        return _global_feats
-
-    def _calc_local_features(self, _move_bout_df: pd.DataFrame, _relevant_idx: int, _night_sptw: pd.DataFrame,
-                             _night_idx: int, _feature_names: np.ndarray, sample_rate: float):
-
-        with utils.Timer() as local_timer:
-            if not (int(MIN_LOCAL_SAMPLE_LENGTH_SECONDS * sample_rate)
-                    <= _move_bout_df.shape[0]
-                    <= int(MAX_LOCAL_SAMPLE_LENGTH_SECONDS * sample_rate)):
-                logger.debug(f"timeseries too short/long: {_relevant_idx} "
-                             f"({(_move_bout_df.index[-1] - _move_bout_df.index[0]).total_seconds():.3f}s)")
-                _local_feats = {_feat_name: np.NaN for _feat_name in _feature_names}
-            else:  # calculate the movement features of each episode
-                _feature_generator = CalcLocalMoveFeatures(self.feat_kwargs['mode'], sample_rate)
-                _local_feats = _feature_generator.calc_features(_move_bout_df)
-
-        _local_feats['id'] = self.patient_id
-        _local_feats['record_id'] = self.record_id if self.record_id else 'none'
-        _local_feats['diagnosis'] = self.label
-        _local_feats['time_start'] = _move_bout_df.index[0]
-        _local_feats['time_end'] = _move_bout_df.index[-1]
-        _local_feats['time_diff'] = (_move_bout_df.index[-1] - _move_bout_df.index[0]).total_seconds()
-        _local_feats['sptw_start'] = _move_bout_df.sptw.iloc[0]
-        _local_feats['sptw_end'] = _move_bout_df.sptw.iloc[0]
-        _local_feats['sptw_idx'] = _night_sptw['sptw_idx']
-        _local_feats['night'] = _night_idx
-        _local_feats['runtime'] = local_timer()
-        return _local_feats
 
     def _get_final_sample_rate(self) -> float:
         """ Retrieves the final sample rate from either the device header or the processing info.
@@ -424,11 +316,11 @@ class FileProcessor:
 
         # Plot raw data
         raw_df = ActimeterFactory(self.acti_file_path, self.saving_suffix).load_raw_data()
-        fig_raw = draw_actigraphy_data(raw_df, self.sleep_log, raw_only=True)
+        fig_raw, _ = draw_actigraphy_data(raw_df, self.sleep_log, raw_only=True)
         _save_plot(fig_raw, raw_plot_path, "raw")
 
         # Plot processed data
-        fig_pr = draw_actigraphy_data(processed_df, self.sleep_log, raw_only=False)
+        fig_pr, _ = draw_actigraphy_data(processed_df, self.sleep_log, raw_only=False)
         _save_plot(fig_pr, processed_plot_path, "processed")
 
         del raw_df

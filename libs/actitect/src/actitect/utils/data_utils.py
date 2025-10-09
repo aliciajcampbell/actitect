@@ -1,10 +1,12 @@
 import datetime
 import logging.config
 import os
-from typing import Dict
+from typing import Dict, Iterable, List
 
 import numpy as np
 import pandas as pd
+
+from .logging_utils import Timer
 
 try:
     from numba import njit as _numba_njit
@@ -22,9 +24,12 @@ except ImportError:  # numba not installed
 
 __all__ = [
     'standardize_sleep_diary', 'df_astype_inplace', 'get_num_workers', 'split_df_in_chunks',
-    'trim_whitespace_df', 'optional_njit', 'assert_valid_df', 'extract_segments', 'handle_duplicate_timestamps',
-    'infer_mean_sample_rate', 'mmap_like', 'mmap2df', 'copy2mmap'
+    'trim_whitespace_df', 'optional_njit', 'PROCESSED_REQUIRED_COLS', 'assert_valid_df', 'df_is_processed_and_valid',
+    'missing_processed_columns', 'extract_segments', 'handle_duplicate_timestamps', 'infer_mean_sample_rate',
+    'mmap_like', 'mmap2df', 'copy2mmap', 'aggregate_local_feat_df_to_global', 'handle_problematic_values_in_feature_df'
 ]
+
+PROCESSED_REQUIRED_COLS = ('wear', 'sptw')
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +160,7 @@ def standardize_sleep_diary(df_in: pd.DataFrame) -> pd.DataFrame:
     except Exception as e:
         raise UserWarning(f"Error while standardizing sleep diary DataFrame: {str(e)}")
 
+
 def assert_valid_df(df: pd.DataFrame, nan_threshold: float = 0.0):
     """ Validate the structure and data quality of a DataFrame.
     Parameters:
@@ -185,6 +191,18 @@ def assert_valid_df(df: pd.DataFrame, nan_threshold: float = 0.0):
     if nan_row_frac > nan_threshold:
         raise UserWarning(f"DataFrame contains {_count_rows_with_nans(df)}/{df.shape[0]} "
                           f"= {nan_row_frac * 100:.2f}% of NaN rows.")
+
+
+def df_is_processed_and_valid(df: pd.DataFrame, required: Iterable[str] = PROCESSED_REQUIRED_COLS) -> bool:
+    """Return True iff all required columns indicating a processed DF are present."""
+    assert_valid_df(df)
+    cols = getattr(df, "columns", [])
+    return all(col in cols for col in required)
+
+
+def missing_processed_columns(df, required=PROCESSED_REQUIRED_COLS):
+    cols = getattr(df, "columns", [])
+    return [c for c in required if c not in cols]
 
 
 def _count_rows_with_nans(df: pd.DataFrame):
@@ -333,3 +351,187 @@ def mmap2df(data_mmap, index_col='time', copy=True):
     columns = [c for c in data_mmap.dtype.names if c != index_col]
     return pd.DataFrame({c: np.asarray(data_mmap[c]) for c in columns},
                         copy=copy, index=pd.Index(np.asarray(data_mmap[index_col]), name=index_col, copy=copy), )
+
+
+def aggregate_local_feat_df_to_global(
+        local_df: pd.DataFrame,
+        local_feature_base_names: list,
+        *,
+        use_numba: bool = True,
+        aggregation_methods: list = None,
+        verbose: bool = True):
+    if 'night' not in local_df.columns:
+        raise KeyError(
+            "'night' column is required for aggregation. "
+            "Each row must be labeled with its night index so nights can be merged independently.")
+
+    if local_df['night'].isna().any():  # sanity checks for 'night'
+        bad = int(local_df['night'].isna().sum())
+        raise ValueError(f"'night' column contains {bad} NaN value(s). Every row must belong to a specific night.")
+
+    if 'record_key' not in local_df.columns:
+        # ensure id/record_id exist (fallbacks only for public API single-record use)
+        if 'id' not in local_df.columns:
+            local_df['id'] = 'none'
+        if 'record_id' not in local_df.columns:
+            local_df['record_id'] = None
+
+        # normalize record_id to handle '', 'none', 'NaN', 'None', etc.
+        recid = local_df['record_id'].astype('string').str.strip().replace(
+            {'': None, 'none': None, 'NaN': None, 'nan': None, 'None': None})
+        local_df['record_key'] = np.where(recid.isna(), local_df['id'].astype('string'),
+                                          local_df['id'].astype('string') + '_' + recid.astype('string'))
+
+    base_meta_cols = ['id', 'record_id']
+    optional_meta_cols = [c for c in ['ground_truth', 'diagnosis'] if c in local_df.columns]
+    meta_cols = [c for c in base_meta_cols if c in local_df.columns] + optional_meta_cols
+
+    aggregation_methods = aggregation_methods or \
+                          ['mean', 'std', 'skew', 'kurt', 'mad', 'iqr', '10th_percentile', '90th_percentile']
+
+    if use_numba:
+        @optional_njit(cache=True, fastmath=True, nogil=True)
+        def mad_numba(x):
+            mean_x = np.mean(x)
+            return np.mean(np.abs(x - mean_x))
+
+        @optional_njit(cache=True, fastmath=True, nogil=True)
+        def iqr_numba(x):
+            return np.percentile(x, 75) - np.percentile(x, 25)
+
+        @optional_njit(cache=True, fastmath=True, nogil=True)
+        def percentile_10_numba(x):
+            return np.percentile(x, 10)
+
+        @optional_njit(cache=True, fastmath=True, nogil=True)
+        def percentile_90_numba(x):
+            return np.percentile(x, 90)
+
+        aggregation_functions = {
+            'mean': 'mean',
+            'std': 'std',
+            'median': 'median',
+            'mad': ('mad', lambda x: mad_numba(x.values)),
+            'skew': ('skew', lambda x: x.skew()),  # numba implementation using numpy was wrong
+            'kurt': ('kurt', lambda x: x.kurt()),  # numba implementation using numpy was wrong
+            'iqr': ('iqr', lambda x: iqr_numba(x.values)),
+            '10th_percentile': ('10th_percentile', lambda x: percentile_10_numba(x.values)),
+            '90th_percentile': ('90th_percentile', lambda x: percentile_90_numba(x.values))
+        }
+
+    else:
+        aggregation_functions = {
+            'mean': 'mean',
+            'std': 'std',
+            'median': 'median',
+            'mad': ('mad', lambda x: (x - x.mean()).abs().mean()),
+            'skew': ('skew', lambda x: x.skew()),
+            'kurt': ('kurt', lambda x: x.kurt()),
+            'iqr': ('iqr', lambda x: x.quantile(.75) - x.quantile(.25)),
+            '10th_percentile': ('10th_percentile', lambda x: x.quantile(.1)),
+            '90th_percentile': ('90th_percentile', lambda x: x.quantile(.9))
+        }
+
+    reducer = {feature: [aggregation_functions[method] for method in aggregation_methods]
+               for feature in local_feature_base_names}
+
+    def _unique_first(x):
+        return x.iloc[0]
+
+    for _mc in meta_cols:
+        reducer[_mc] = _unique_first
+
+    missing_feats = [c for c in local_feature_base_names if c not in local_df.columns]
+    if missing_feats:
+        raise KeyError(
+            f"Missing expected local feature column(s): {missing_feats}. "
+            f"Available columns: {sorted(local_df.columns.tolist())}"
+        )
+
+    with Timer() as agg_timer:
+        global_feat_df = local_df.groupby(['record_key', 'night'])[
+            local_feature_base_names + meta_cols
+            ].agg(reducer).reset_index()
+        if verbose:
+            logger.info(f"local to global aggregation done. ({agg_timer()}s)")
+    global_feat_df.columns = ['_'.join(col).strip() if col[1] else col[0] for col in global_feat_df.columns]
+    _rename_map = {
+        'ground_truth__unique_first': 'ground_truth',
+        'diagnosis__unique_first': 'diagnosis',
+        'id__unique_first': 'id',
+        'record_id__unique_first': 'record_id',
+    }
+    _present = {k: v for k, v in _rename_map.items() if k in global_feat_df.columns}
+    if _present:
+        global_feat_df.rename(columns=_present, inplace=True)
+
+    return global_feat_df
+
+
+def handle_problematic_values_in_feature_df(
+        df: pd.DataFrame,
+        df_log_name: str,
+        drop: bool, replace: dict,
+        excluded_cols: List[str],
+        *,
+        verbose: bool = True):
+    """ Handles problematic values in a DataFrame by either dropping the rows or replacing the values.
+    Parameters
+        :param df: (pd.DataFrame) The DataFrame to process.
+        :param df_log_name: (str) The name of the DataFrame for logging purposes.
+        :param drop: (bool) If True, drop rows with problematic values.
+        :param replace: (dict) A dictionary mapping problematic value types to their replacement values.
+                        Example: {'NaN': 0, 'Inf': 999, 'Whitespace': 'NA', 'Non-Standard Missing': 'NA'}
+        :param excluded_cols: (List[str]) A list of column names to exclude from the check.
+        :param verbose: (bool, optional) log a summary or not. Defaults to True.
+    Returns:
+        :return: (pd.DataFrame) The DataFrame with problematic values handled as specified."""
+    assert not (drop and replace), "specify either 'drop' or 'replace', but not both."
+
+    numerical_cols = df.select_dtypes(include=[np.number]).columns.difference(excluded_cols)
+
+    def _val_is_problematic(value):  # check whether value is problematic or not, i.e. NaN, Inf, whitespace, etc.
+        try:
+            if pd.isna(value):
+                return 'NaN'
+            elif np.isinf(value):
+                return 'Inf'
+            elif value == '' or value == ' ':
+                return 'Whitespace'
+            elif value in ['N/A', 'null']:
+                return 'Non-Standard Missing'
+            else:
+                return None
+        except TypeError:
+            return None
+
+    # is_problematic_df = df.applymap(_val_is_problematic)
+    # problematic_counts = is_problematic_df.stack().value_counts()
+    is_problematic_df = df[numerical_cols].map(_val_is_problematic)
+    problematic_counts = is_problematic_df.stack().value_counts()
+
+    if verbose:
+        total_cells = df[numerical_cols].size
+        total_problematic = int(problematic_counts.sum())
+        frac = total_problematic / total_cells if total_cells else 0.0
+        if total_problematic > 0:
+            detail = ", ".join(f"{typ}: {cnt}" for typ, cnt in problematic_counts.items())
+            logger.info(
+                f"found {total_problematic} problematic cells ({frac * 100:.1g}% of "
+                f"{numerical_cols.size} cols×{df.shape[0]} rows) in '{df_log_name}': {detail}. "
+                f"Using drop={drop}, replace={replace}.")
+        else:
+            logger.info(f"found no problematic values in '{df_log_name}' DataFrame.")
+
+    if drop:  # drop the problematic rows
+        df = df[~is_problematic_df.notna().any(axis=1)]
+    elif replace:  # replace with pre-defined replacement values
+        def _replace_val(val):
+            problem_type = _val_is_problematic(val)
+            if problem_type in replace:
+                return replace[problem_type]
+            return val
+
+        df[numerical_cols] = df[numerical_cols].applymap(_replace_val)
+
+    return df

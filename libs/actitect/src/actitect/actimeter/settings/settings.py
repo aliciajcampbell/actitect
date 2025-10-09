@@ -7,20 +7,32 @@ from typing import Optional, BinaryIO
 
 import numpy as np
 
-__all__ = ['LogRecordV1', 'LogRecordV2']
-
 logger = logging.getLogger(__name__)
+
+__all__ = ['ActiGraphLogRecordV1', 'ActiGraphLogRecordV2', 'ResolveNwSleepParams']
+
+
+@dataclass(frozen=True)
+class ResolveNwSleepParams:
+    """Heuristic thresholds used to resolve potential ambiguities between detected non-wear and sleep."""
+    thres_non_wear_is_short: int = 4  # threshold for considering a non-wear period 'short' (in hours).
+    thres_onset: int = 4  # threshold for sleep onset at the start of recording (in hours).
+    thres_offset: int = 4  # threshold for sleep offset at the end of recording (in hours).
+    night_start: int = 22  # hour representing the start of the night period (24-hour format).
+    night_end: int = 9  # hour representing the end of the night period (24-hour format).
+    night_sptw_threshold_h: int = 4  # threshold for minimum sleep duration during the night (in hours).
+    night_sptw_duration_during_night_h: int = 2  # threshold for minimum overlap with night period (in hours).
 
 
 @dataclass
-class LogRecord(ABC):
+class ActiGraphLogRecord(ABC):
     """Each LogRecord consists of a header, the payload carrying the data and a checksum. The header determines
     what kind of data (e.g. activity, battery, etc.) is contained in the payload. Subclasses implement the decoders for
     AGDC and NHANES formats."""
 
-    header: 'LogRecord.Header'
-    payload: 'LogRecord.Payload'
-    checksum: 'LogRecord.Checksum'
+    header: 'ActiGraphLogRecord.Header'
+    payload: 'ActiGraphLogRecord.Payload'
+    checksum: 'ActiGraphLogRecord.Checksum'
 
     record_type: str
 
@@ -42,20 +54,20 @@ class LogRecord(ABC):
 
     @classmethod
     @abstractmethod
-    def from_stream(cls, stream: BinaryIO) -> Optional['LogRecord']:
+    def from_stream(cls, stream: BinaryIO) -> Optional['ActiGraphLogRecord']:
         """Entry point to parse a LogRecord from a binary stream."""
         pass
 
 
 @dataclass
-class LogRecordV1(LogRecord, ABC):  # NHANES
+class ActiGraphLogRecordV1(ActiGraphLogRecord, ABC):  # NHANES
     @classmethod
-    def from_stream(cls, stream: BinaryIO) -> Optional['LogRecord']:
+    def from_stream(cls, stream: BinaryIO) -> Optional['ActiGraphLogRecord']:
         raise NotImplementedError("LogRecordV1 is not implemented (NHANES format).")
 
 
 @dataclass
-class LogRecordV2(LogRecord):  # AGDC
+class ActiGraphLogRecordV2(ActiGraphLogRecord):  # AGDC
     """https://github.com/actigraph/GT3X-File-Format"""
     DATA_STREAM_FILE_NAME: str = "log.bin"
     CALIBRATION_FILE_NAME: str = 'calibration.json'
@@ -108,7 +120,7 @@ class LogRecordV2(LogRecord):  # AGDC
         }
 
     @classmethod
-    def from_stream(cls, stream: BinaryIO) -> Optional['LogRecord']:
+    def from_stream(cls, stream: BinaryIO) -> Optional['ActiGraphLogRecord']:
         try:
             # first 8-bytes are header
             header_bytes = stream.read(8)
@@ -255,7 +267,7 @@ class LogRecordV2(LogRecord):  # AGDC
         return f"UNKNOWN_{code:#02x}"
 
     @staticmethod
-    def _compute_checksum(header: LogRecord.Header, payload: bytes) -> int:
+    def _compute_checksum(header: ActiGraphLogRecord.Header, payload: bytes) -> int:
         """https://github.com/actigraph/GT3X-File-Format/tree/main"""
         chk = header.separator ^ header.type
         # XOR 4-byte timestamp

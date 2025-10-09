@@ -5,13 +5,11 @@ from typing import Union, List
 
 import numpy as np
 import pandas as pd
-from numba import jit
 from sklearn.utils.class_weight import compute_class_weight
 
 from actitect import utils
 from actitect.config import RebalanceDatasetsConfig
 from .types import FeatureSet
-
 
 __all__ = ['DataLoader']
 
@@ -355,68 +353,6 @@ class DataLoader:
 
         return patient_dir_to_dataset_id
 
-    def _handle_problematic_values(self, df, df_log_name: str, drop: bool, replace: dict, excluded_cols: List[str]):
-        """ Handles problematic values in a DataFrame by either dropping the rows or replacing the values.
-
-        Parameters:
-            :param df: (pd.DataFrame) The DataFrame to process.
-            :param df_log_name: (str) The name of the DataFrame for logging purposes.
-            :param drop: (bool) If True, drop rows with problematic values.
-            :param replace: (dict) A dictionary mapping problematic value types to their replacement values.
-                            Example: {'NaN': 0, 'Inf': 999, 'Whitespace': 'NA', 'Non-Standard Missing': 'NA'}
-
-        Returns:
-            :return: (pd.DataFrame) The DataFrame with problematic values handled as specified."""
-        assert not (drop and replace), "specify either 'drop' or 'replace', but not both."
-
-        numerical_cols = df.select_dtypes(include=[np.number]).columns.difference(excluded_cols)
-
-        def _val_is_problematic(value):  # check whether value is problematic or not, i.e. NaN, Inf, whitespace, etc.
-            try:
-                if pd.isna(value):
-                    return 'NaN'
-                elif np.isinf(value):
-                    return 'Inf'
-                elif value == '' or value == ' ':
-                    return 'Whitespace'
-                elif value in ['N/A', 'null']:
-                    return 'Non-Standard Missing'
-                else:
-                    return None
-            except TypeError:
-                return None
-
-        # is_problematic_df = df.applymap(_val_is_problematic)
-        # problematic_counts = is_problematic_df.stack().value_counts()
-        is_problematic_df = df[numerical_cols].map(_val_is_problematic)
-        problematic_counts = is_problematic_df.stack().value_counts()
-
-        if self.verbose:
-            total_cells = df[numerical_cols].size
-            total_problematic = int(problematic_counts.sum())
-            frac = total_problematic / total_cells if total_cells else 0.0
-            if total_problematic > 0:
-                detail = ", ".join(f"{typ}: {cnt}" for typ, cnt in problematic_counts.items())
-                logger.info(
-                    f"found {total_problematic} problematic cells ({frac * 100:.1g}% of "
-                    f"{numerical_cols.size} cols×{df.shape[0]} rows) in '{df_log_name}': {detail}. "
-                    f"Using drop={drop}, replace={replace}.")
-            else:
-                logger.info(f"found no problematic values in '{df_log_name}' DataFrame.")
-
-        if drop:  # drop the problematic rows
-            df = df[~is_problematic_df.notna().any(axis=1)]
-        elif replace:  # replace with pre-defined replacement values
-            def _replace_val(val):
-                problem_type = _val_is_problematic(val)
-                if problem_type in replace:
-                    return replace[problem_type]
-                return val
-
-            df[numerical_cols] = df[numerical_cols].applymap(_replace_val)
-
-        return df
-
     def _create_local_feature_dataframe(self, util_cols: List[str] = None):
         if self.verbose:
             logger.info('creating local feature DataFrame... ')
@@ -452,8 +388,9 @@ class DataLoader:
             # 'toilette' filter
             _local_feat_df = _local_feat_df[(_local_feat_df.time_diff < 50) & (_local_feat_df.time_diff > .5)]
             _local_feat_df['ground_truth'] = _local_feat_df.diagnosis.map(self.binary_mapping).values
-            _local_feat_df = self._handle_problematic_values(
-                _local_feat_df, drop=True, replace=None, df_log_name='local_feat_df', excluded_cols=util_cols)
+            _local_feat_df = utils.handle_problematic_values_in_feature_df(
+                _local_feat_df, drop=True, replace=None, df_log_name='local_feat_df', excluded_cols=util_cols,
+                verbose=self.verbose)
 
         if self.verbose:
             logger.info(f'creating local feature DataFrame... done. ({timer()}s)')
@@ -497,75 +434,14 @@ class DataLoader:
 
     def _aggregate_local_to_global(self, _local_df_copy: pd.DataFrame, use_numba: bool):
 
-        if use_numba:
-            @jit(nopython=True)
-            def mad_numba(x):
-                mean_x = np.mean(x)
-                return np.mean(np.abs(x - mean_x))
+        global_feat_df = utils.aggregate_local_feat_df_to_global(
+            _local_df_copy, self.included_local_features,
+            use_numba=use_numba, aggregation_methods=self.aggregation, verbose=self.verbose)
 
-            @jit(nopython=True)
-            def iqr_numba(x):
-                return np.percentile(x, 75) - np.percentile(x, 25)
-
-            @jit(nopython=True)
-            def percentile_10_numba(x):
-                return np.percentile(x, 10)
-
-            @jit(nopython=True)
-            def percentile_90_numba(x):
-                return np.percentile(x, 90)
-
-            aggregation_functions = {
-                'mean': 'mean',
-                'std': 'std',
-                'median': 'median',
-                'mad': ('mad', lambda x: mad_numba(x.values)),
-                'skew': ('skew', lambda x: x.skew()),  # numba implementation using numpy was wrong
-                'kurt': ('kurt', lambda x: x.kurt()),  # numba implementation using numpy was wrong
-                'iqr': ('iqr', lambda x: iqr_numba(x.values)),
-                '10th_percentile': ('10th_percentile', lambda x: percentile_10_numba(x.values)),
-                '90th_percentile': ('90th_percentile', lambda x: percentile_90_numba(x.values))
-            }
-
-        else:
-            aggregation_functions = {
-                'mean': 'mean',
-                'std': 'std',
-                'median': 'median',
-                'mad': ('mad', lambda x: (x - x.mean()).abs().mean()),
-                'skew': ('skew', lambda x: x.skew()),
-                'kurt': ('kurt', lambda x: x.kurt()),
-                'iqr': ('iqr', lambda x: x.quantile(.75) - x.quantile(.25)),
-                '10th_percentile': ('10th_percentile', lambda x: x.quantile(.1)),
-                '90th_percentile': ('90th_percentile', lambda x: x.quantile(.9))
-            }
-
-        reducer = {feature: [aggregation_functions[method] for method in self.aggregation]
-                   for feature in self.included_local_features}
-
-        def _unique_first(x):
-            return x.iloc[0]
-
-        reducer['ground_truth'] = _unique_first  # unique ints, choose first
-        reducer['diagnosis'] = _unique_first  # unique strings, choose first
-        reducer['id'] = _unique_first  # unique strings, choose first
-        reducer['record_id'] = _unique_first  # unique strings, choose first
-
-        with utils.Timer() as agg_timer:
-            global_feat_df = _local_df_copy.groupby(['record_key', 'night'])[
-                self.included_local_features + ['id', 'record_id', 'ground_truth', 'diagnosis']
-                ].agg(reducer).reset_index()
-            if self.verbose:
-                logger.info(f"local to global aggregation done. ({agg_timer()}s)")
-        global_feat_df.columns = ['_'.join(col).strip() if col[1] else col[0] for col in global_feat_df.columns]
-        global_feat_df.rename(columns={'ground_truth__unique_first': 'ground_truth'}, inplace=True)
-        global_feat_df.rename(columns={'diagnosis__unique_first': 'diagnosis'}, inplace=True)
-        global_feat_df.rename(columns={'id__unique_first': 'id'}, inplace=True)
-        global_feat_df.rename(columns={'record_id__unique_first': 'record_id'}, inplace=True)
-
-        return self._handle_problematic_values(
+        return utils.handle_problematic_values_in_feature_df(
             global_feat_df, drop=True, replace=None, df_log_name='global_feat_df',
-            excluded_cols=['record_key', 'id', 'record_id', 'diagnosis', 'ground_truth'])
+            excluded_cols=['record_key', 'id', 'record_id', 'diagnosis', 'ground_truth'],
+            verbose=self.verbose)
 
     def _create_global_feature_dataframe(self, local_df_copy: pd.DataFrame, use_numba: bool = True,
                                          return_structure_only: bool = False, global_only: bool = False):
