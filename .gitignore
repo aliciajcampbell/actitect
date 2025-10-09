@@ -27,12 +27,13 @@ libs/actitect-rbdisco/README.md
 libs/actitect-rbdisco/LICENSE
 libs/actitect/src/actitect/config/experiment_root.local.json
 
-# Data blobs
+# Data
 *.csv
 *.xlsx
 *.cwa
 *.gt3x
 *.pdf
+*.log
 *.png
 *.tar
 *.npy
@@ -40,4 +41,4 @@ libs/actitect/src/actitect/config/experiment_root.local.json
 *.h5
 *.parquet
 *.back
-examples/actitect/*.cwa
+
