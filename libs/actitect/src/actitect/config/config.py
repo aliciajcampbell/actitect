@@ -56,13 +56,15 @@ class BaseConfig:
 
     @classmethod
     def from_yaml(cls, yaml_path: Path = None, which: str = 'internal_cv') -> 'BaseConfig':
+        from importlib.resources import files as _pkg_files
+        _rbdisco_configs = _pkg_files('actitect.rbdisco').joinpath('configs')
         if not yaml_path:
             if which == 'internal_cv':
-                yaml_path = Path(__file__).parent.joinpath('pipeline_singleCenter.yaml')
+                yaml_path = _rbdisco_configs.joinpath('pipeline_singleCenter.yaml')
             elif which == 'external_cv':
-                yaml_path = Path(__file__).parent.joinpath('pipeline_multiCenter.yaml')
+                yaml_path = _rbdisco_configs.joinpath('pipeline_multiCenter.yaml')
             elif which == 'external_test':
-                yaml_path = Path(__file__).parent.joinpath('external_test.yaml')
+                yaml_path = _rbdisco_configs.joinpath('external_test.yaml')
             else:
                 raise ValueError(f'Unknown value for {which}: {yaml_path}')
 

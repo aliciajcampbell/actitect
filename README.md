@@ -8,7 +8,7 @@ pretrained models for RBD prediction from wrist actigraphy as described in: <mar
 - [Overview](#overview)
 - [Installation](#installation)
 - [ActiTect Usage](#actitect-usage-) ([CLI](#actitect-cli-usage-) / [API](#actitect-api-usage))
-- [RBDisco Usage](#rbdisco-usage)
+- [RBDisco Usage](#rbdisco-usage) ([CLI](#rbdisco-usage) / [API](#rbdisco-api-usage))
 - [Citation](#citation)
 
 ## Overview 
@@ -39,7 +39,7 @@ after this, you should see
 ```
 
 ## ActiTect Usage 
-You can use the general purpose actigraphy toolkit either as a CLI tool or directly via python as API.
+You can use the general purpose actigraphy toolkit either as a CLI tool or directly via a light, pythonic API.
 The supported actigraphy file formats are
 - **Axivity AX6:** `.cwa`
 - **GENEActiv:** `.bin`
@@ -174,16 +174,16 @@ actitect_experiment/ (the main folder of your experiment)
 </details>
 
 ### ActiTect API Usage
-For users interested in only specific steps of the toolkit, they are accessible as a common Python package. The API contains
+For users interested in only specific steps of the toolkit, they are accessible via a pythonic API containing 
  - `actitect.api.load()`: load data of any supported device into memory.
  - `actitect.api.process()`: process the data, including preprocessing and non-wear/sleep detection.
  - `actitect.api.plot()`: visualize raw or processed actigraphy data.
  - `actitect.api.compute_per_night_sleep_features()`: compute numerical descriptors of sleep motion patterns.
 
-For a detailed example on how to use each step, see this [example notebook](examples/actitect/api_example.py.ipynb).
+For a detailed example on how to use each step, see this [example notebook](examples/actitect/actitect_api_example.ipynb).
 
 ## RBDisco Usage
-To use RBDisco to make RBD status predictions for suited actigraphy files (see <mark>TODO</mark>), make sure you
+To use RBDisco to make RBD status predictions for [suited actigraphy files](#actitect-usage-), make sure you
 1. Installed the RBDisco extension of ActiTect (see [Installation](#installation))
 2. You've run a full processing of your actigraphy files using the [ActiTect CLI](#actitect-cli-usage-),
 including the data preprocessing steps and feature extraction (default).
@@ -201,7 +201,8 @@ containing individual predictions and a `.json` file containing classification m
 <mark> TODO: it would actually make sense to provide a script that does processing and prediciton in one go!</mark>
 
 #### RBDisco API usage
-<mark> does it make sense to make a pyton api here?</mark>
+Similar to the core ActiTect API, you can use `actitect.rbdisco.predict()` to use our pretrained models for RBD status 
+prediction on any supported actigraphy file. See this [example](examples/rbdisco/rbdisco_api_example.ipynb) for detailed usage.
 
 ---
 

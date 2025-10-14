@@ -31,7 +31,6 @@ class Generic(BaseDevice):
         return f"Generic(patient_ID='{self.meta['patient_id']}')"
 
     def _parse_binary_to_df(self, resolve_duplicates: bool = True, header_only: bool = False):
-        logger.info(f"(io: {self.meta['patient_id']}) loading from '{self.processing_info['loading']['filepath']}'.")
         if header_only:
             raise ValueError("'header_only' is not supported for Generic device.")
         else:

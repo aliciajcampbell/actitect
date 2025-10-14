@@ -1,10 +1,11 @@
 """ Functions to generate descriptive motion features from time-series data."""
 
 import gc
+from pathlib import Path
 import logging
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import List, Any, Optional, Dict, Tuple
+from typing import List, Any, Optional, Dict, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -17,7 +18,7 @@ from .. import utils
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['compute_sleep_features', 'compute_per_night_sleep_features']
+__all__ = ['compute_sleep_features', 'compute_per_night_sleep_features', 'build_aggregated_feature_list']
 
 
 @dataclass
@@ -110,16 +111,53 @@ class CalcLocalMoveFeatures:
 
 
 class CalcGlobalMoveFeatures:
-    def __init__(self, global_move_segments_df: pd.DataFrame, mode: str, create_cluster_plots: bool):
+    def __init__(self, global_move_segments_df: pd.DataFrame, mode: str, create_cluster_plots: bool,
+                 names_only: bool = False):
         self.mode = mode
         self.create_cluster_plots = create_cluster_plots
         self.cluster_fig = None
         self.setup = FeatureSetup()
         if self.mode == 'per_night':
-            self.features = self.per_night_version(global_move_segments_df)
-
+            if not names_only:
+                self.features = self.per_night_version(global_move_segments_df)
         else:
             raise ValueError(f"The feature mode {self.mode} is unknown. Currently available are: 'per_night'")
+
+    def get_feature_names(self):
+        """Return global (per-night) feature names without requiring a prior compute.
+
+        Mirrors CalcLocalMoveFeatures.get_feature_names by generating a tiny synthetic
+        'movement' series, extracting segments via utils.extract_segments, and running
+        the same per-night pipeline to obtain keys.
+        """
+        # Try fast path: probe with a tiny synthetic night that yields a few segments
+        try:
+            # Build a minimal dummy night with a DateTimeIndex and a 'movement' boolean
+            idx = pd.date_range("2000-01-01", periods=600, freq="S")  # 10 minutes @ 1 Hz
+            movement = np.zeros(len(idx), dtype=bool)
+            # Create a few short "movement bouts"
+            movement[50:65] = True
+            movement[140:170] = True
+            movement[300:315] = True
+            movement[480:520] = True
+
+            _dummy = pd.DataFrame({"movement": movement}, index=idx)
+            # Use the same extractor as production to match expected schema
+            move_segments = utils.extract_segments(_dummy, 'movement', True, time_unit='s')
+
+            # Run the same global feature function to get the output dict keys
+            feats = self.per_night_version(move_segments)
+            return list(feats.keys())
+
+        except Exception as e:
+            # Fallbacks: if we already have computed features, use their keys;
+            # otherwise surface a clear error.
+            if hasattr(self, "features") and isinstance(self.features, dict) and self.features:
+                logger.warning("get_feature_names(): probe failed, falling back to existing features; "
+                               f"reason: {e}")
+                return list(self.features.keys())
+            raise RuntimeError(f"CalcGlobalMoveFeatures.get_feature_names() probe failed and no "
+                               f"features available to fall back on: {e}")
 
     def per_night_version(self, move_segments: pd.DataFrame):
         global_features = {}
@@ -450,3 +488,35 @@ def _compute_local_features_per_night(
     _local_feats['night'] = night_idx
     _local_feats['runtime'] = local_timer()
     return _local_feats
+
+
+def build_aggregated_feature_list(
+        from_yaml: bool,
+        *,
+        default_aggregation: List[str] = None,
+) -> np.ndarray:
+    """Return exhaustive feature names: all GLOBAL names + aggregated LOCAL names.
+    Parameters:
+        :param from_yaml: (bool): whether to return feature names from YAML config, otherwise build full list.
+        :param default_aggregation: (list[str]) of aggregation suffixes applied to each local base feature.
+    Returns:
+        :return: (np.ndarray) of feature names."""
+    default_aggregation = default_aggregation or (
+        'mean', 'std', 'skew', 'kurt', 'mad', 'iqr', '10th_percentile', '90th_percentile')
+    if from_yaml:
+        from actitect.config import PipelineConfig
+        cfg = PipelineConfig.from_yaml()
+        local_base = cfg.data.loader.included_local_features
+        aggregation = cfg.data.loader.aggregation
+        global_names = cfg.data.loader.included_global_features
+
+    else:
+        local_base = CalcLocalMoveFeatures(mode='per_night', sample_rate=None).get_feature_names()
+        aggregation = default_aggregation
+        global_names: List[str] = CalcGlobalMoveFeatures(
+            mode='per_night', global_move_segments_df=None, names_only=True, create_cluster_plots=False).get_feature_names()
+
+    local_agg = [f"{name}_{agg}" for name in local_base for agg in aggregation]
+    return np.array(list(global_names) + local_agg)
+
+

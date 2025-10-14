@@ -231,10 +231,7 @@ class AxivityAx6(BaseDevice):
                 'ax6_logging_threshold_d' days. The default is set to 8 but might be adjusted for longer data-taking.
             :param header_only: (bool, Optional) If True, only the binary header is returned. Default is False.
         Returns:
-            :return: (pd.DataFrame) the raw data parsed as DataFrame.
-        """
-        logger.info(f"(io: {self.meta['patient_id']}) loading from '{self.processing_info['loading']['filepath']}'.")
-
+            :return: (pd.DataFrame) the raw data parsed as DataFrame."""
         with self.processing_info['loading']['filepath'].open('rb') as f:
             buffer = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
 

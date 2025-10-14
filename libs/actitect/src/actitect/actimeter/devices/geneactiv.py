@@ -44,7 +44,6 @@ class GENEActiv(BaseDevice):
         return f"GENEActiv(patient_ID='{self.meta['patient_id']}')"
 
     def _parse_binary_to_df(self, resolve_duplicates=True, header_only: bool = False):
-        logger.info(f"(io: {self.meta['patient_id']}) loading from '{self.processing_info['loading']['filepath']}'.")
         try:
             with open(self.processing_info['loading']['filepath'], 'rb') as f:
                 file_content = f.read()

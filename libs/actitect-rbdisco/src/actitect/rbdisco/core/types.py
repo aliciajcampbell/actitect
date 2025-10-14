@@ -21,8 +21,9 @@ SCALER_MAPPING = {'standard': preprocessing.StandardScaler,
 @dataclass
 class FeatureSet:
     x: np.ndarray  # features (n_samples, n_features)
-    y: np.ndarray  # labels (n_samples, )
-    group: np.ndarray  # group mapping, (n_samples, ), maps the samples (nights) to the corresponding patient
+    y: Optional[np.ndarray] = field(default=None)  # labels (n_samples, )
+    # group mapping, (n_samples, ), maps the samples (nights) # to the corresponding patient
+    group: Optional[np.ndarray] = field(default=None)
 
     # feature mapping (n_features), maps the feature indices to the feature name
     feat_map: Optional[np.ndarray] = field(default=None)
@@ -51,20 +52,35 @@ class FeatureSet:
         return deepcopy(self)
 
     def select_features(self, feature_names: Union[list, np.ndarray]):
-        """ Select a subset of features based on provided indices.
-        Parameters:
-            :param feature_names: (array-like) Str names of features to select.
-        Returns:
-            :return: (FeatureSet) A new FeatureSet instance with selected features. """
-        assert self.feat_map is not None, f"'feat_map' attribute must be set."
-        selected_indices = [i for i, name in enumerate(self.feat_map) if name in feature_names]
+        """Select a subset of features by name, preserving the order given in `feature_names`."""
+        assert self.feat_map is not None, "'feat_map' attribute must be set."
+
+        # Ensure array indexing works
+        feat_map_arr = np.asarray(self.feat_map)
+
+        # Map name -> index in current FeatureSet
+        name_to_idx = {name: i for i, name in enumerate(feat_map_arr)}
+
+        # Keep order of `feature_names`; drop those not present (warn)
+        selected_names = [n for n in feature_names if n in name_to_idx]
+        missing = [n for n in feature_names if n not in name_to_idx]
+        if missing:
+            logger.warning("select_features: %d feature(s) missing from feat_map (first few: %s)",
+                           len(missing), missing[:5])
+
+        if not selected_names:
+            raise ValueError("select_features: none of the requested feature names are present.")
+
+        selected_indices = [name_to_idx[n] for n in selected_names]
 
         new_x = self.x[:, selected_indices]
-        new_feat_map = self.feat_map[selected_indices]
+        new_feat_map = feat_map_arr[selected_indices]
+
         return FeatureSet(
-            x=new_x, y=self.y, group=self.group, feat_map=new_feat_map, process_params=self.process_params,
-            prob=self.prob, dataset=self.dataset, smote_mask=self.smote_mask, y_str=self.y_str,
-            from_fold=self.from_fold, feat_rank=self.feat_rank)
+            x=new_x, y=self.y, group=self.group, feat_map=new_feat_map,
+            process_params=self.process_params, prob=self.prob, dataset=self.dataset,
+            smote_mask=self.smote_mask, y_str=self.y_str, from_fold=self.from_fold, feat_rank=self.feat_rank
+        )
 
     def select_samples(self, sample_indices):
         """ Select a subset of samples based on provided indices.
@@ -73,8 +89,8 @@ class FeatureSet:
         Returns:
             :return: (FeatureSet) A new FeatureSet instance with selected samples. """
         new_x = self.x[sample_indices, :]
-        new_y = self.y[sample_indices]
-        new_group = self.group[sample_indices]
+        new_group = self.group[sample_indices] if self.group is not None else None
+        new_y = self.y[sample_indices] if self.y is not None else None
         new_prob = self.prob[sample_indices] if self.prob is not None else None
         new_dataset = self.dataset[sample_indices] if self.dataset is not None else None
         new_smote_mask = self.smote_mask[sample_indices] if self.smote_mask is not None else None
@@ -145,6 +161,7 @@ class FeatureSet:
         Parameters:
             :param process_params: (dict): Parameters for the processing steps.
             :param ignore_smote: (bool): If True (default), SMOTE will not be applied, regardless of process_params.
+                Default is True since .transform() is designed for inference use rather then training.
 
         Returns:
             FeatureSet: The updated FeatureSet instance (self).
@@ -198,7 +215,8 @@ class FeatureSet:
             merged_y_str = np.concatenate((self.y_str, other.y_str))
 
         return FeatureSet(x=merged_x, y=merged_y, group=merged_group, feat_map=self.feat_map, feat_rank=self.feat_rank,
-            process_params=None, smote_mask=merged_smote, prob=merged_prob, y_str=merged_y_str, dataset=merged_dataset)
+                          process_params=None, smote_mask=merged_smote, prob=merged_prob, y_str=merged_y_str,
+                          dataset=merged_dataset)
 
     def get_strat_labels(self, stratify_by_dataset_if_pooled: bool = False):
         """ Create labels for stratification based on the y and dataset. For non_pooled datasets, just by class."""
@@ -602,8 +620,8 @@ class FeatureSet:
         self.smote_mask = np.concatenate(masks)
 
         num_new_total = int(sum(per_site_new.values()))
-        self.process_params['SMOTE'] = { 'used': True, 'mode': 'per_ds', 'seed': seed,
-            'num_new_samples': num_new_total, 'per_site': per_site_new}
+        self.process_params['SMOTE'] = {'used': True, 'mode': 'per_ds', 'seed': seed,
+                                        'num_new_samples': num_new_total, 'per_site': per_site_new}
 
         site_str = ", ".join(f"{s}: +{n}" for s, n in sorted(per_site_new.items()))
         logger.info(

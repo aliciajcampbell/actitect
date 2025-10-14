@@ -44,8 +44,6 @@ class ActiGraph(BaseDevice):  # noqa
         return f"ActiGraph(patient_ID='{self.meta['patient_id']}')"
 
     def _parse_binary_to_df(self, header_only: bool = False):
-        gt3x_path = self.processing_info['loading']['filepath']
-        logger.info(f"(io: {self.meta['patient_id']}) loading from '{gt3x_path}'.")
 
         try:
             # get header from 'info.txt'

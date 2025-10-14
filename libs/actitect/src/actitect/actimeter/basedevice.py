@@ -92,6 +92,9 @@ class BaseDevice(ABC):
 
         try:
             with utils.Timer() as load_timer:
+                logger.info(
+                    f"(io: {self.meta['patient_id']}) parsing data from"
+                    f" '{self.processing_info['loading']['filepath'].name}'.")
                 raw_df, header = self._parse_binary_to_df(header_only=header_only)
                 if not header_only:
                     utils.assert_valid_df(raw_df)
