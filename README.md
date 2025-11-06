@@ -1,9 +1,7 @@
-# ActiTect & RBDisco: Actigraphy Toolkit and RBD Prediction 
-
+# ActiTect & RBDisco: Actigraphy Toolkit and RBD Prediction
 This repository hosts ActiTect, a general-purpose Python toolkit for actigraphy analysis(preprocessing,
 feature extraction, QC, and visualization), and RBDisco, an extension that provides reproducible pipelines and 
 pretrained models for RBD prediction from wrist actigraphy as described in: <mark>**TODO:URL**</mark>.
-
 <!-- [Introduction](#introduction)-->
 - [Overview](#overview)
 - [Installation](#installation)
@@ -12,8 +10,12 @@ pretrained models for RBD prediction from wrist actigraphy as described in: <mar
 - [Citation](#citation)
 
 ## Overview 
-<mark> TODO: quick summary of paper, and each tool and idea of usage.</mark>
-
+ActiTect is a modular, open-source toolkit for standardized analysis of research-grade actigraphy data.
+It provides a unified command-line and Python interface for loading and preprocessing data from commonly 
+used wearable devices. Core processing steps include resampling, bandpass filtering, auto-calibration,
+artifact removal, and sleep/non-wear segmentation, enabling harmonized analyses across cohorts and studies.
+The RBDisco plugin extends ActiTect with pretrained machine-learning models for the detection of 
+REM Sleep Behavior Disorder (RBD) from actigraphy recordings as described in <mark>**TODO:URL**</mark>.
 ## Installation
 
 You can install the package from source with
@@ -198,7 +200,12 @@ extra options and simply call `actitect-rbdisco`. Please refer to
 The results of the analysis will be stored under `./results/pipeline/run_<date_id>/` and consist of a `.csv` file 
 containing individual predictions and a `.json` file containing classification metrics. 
 
-<mark> TODO: it would actually make sense to provide a script that does processing and prediciton in one go!</mark>
+<details>
+  <summary>Note: combined CLI  </summary>
+    <div id="default-file-org"></div>
+  We might provide a combined ActiTect + RBDisco CLI in the future, for now please use the separate CLIs or the API. 
+
+</details>
 
 #### RBDisco API usage
 Similar to the core ActiTect API, you can use `actitect.rbdisco.predict()` to use our pretrained models for RBD status 

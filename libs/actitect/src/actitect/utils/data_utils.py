@@ -304,11 +304,13 @@ def handle_duplicate_timestamps(df: pd.DataFrame, remove_dupes: bool = True, **p
     return df
 
 
-def infer_mean_sample_rate(df: pd.DataFrame, mute_logging: bool = True):
+def infer_mean_sample_rate(df: pd.DataFrame, mute_logging: bool = True, min_hz: float = 1 / 60):
     """ Infer the mean and standard deviation of the sampling rate in a DataFrame.
     Parameters:
         :param df: (pd.DataFrame) Input data, must have a DatetimeIndex.
         :param mute_logging: (bool, Optional) If True, suppresses logging messages. Defaults to True.
+        :param min_hz: (float, Optional) Minimum sampling rate in Hz. Defaults to 1 per min. It's used to assert that
+            non-wear periods do not skew the mean sample rate due to large gaps.
     Returns:
         :return: (Tuple[bool, float, float])
             is_uniform (bool): Indicates whether the sampling rate is uniform.
@@ -316,14 +318,17 @@ def infer_mean_sample_rate(df: pd.DataFrame, mute_logging: bool = True):
             std_sample_rate (float): Standard deviation of the sampling rate in Hz, rounded to two decimals."""
     assert isinstance(df.index, pd.DatetimeIndex), "DataFrame must have 'DatetimeIndex'"
     time_diffs = df.index.to_series().diff().dt.total_seconds().values[1:]
+    filtered_time_diffs = time_diffs[time_diffs <= 1 / min_hz]
+
     with np.errstate(divide='ignore', invalid='ignore'):  # ignore warning when df still contains duplicate timestamps
-        mean_sample_rate, std_sample_rate = 1 / np.mean(time_diffs), np.std(1 / time_diffs)  # not a typo
-    is_uniform = True if len(np.unique(time_diffs)) == 1 and np.isclose(std_sample_rate, 0) else False
+        mean_sample_rate, std_sample_rate = \
+            1 / np.mean(filtered_time_diffs), np.std(1 / filtered_time_diffs)  # not a typo
+    is_uniform = True if len(np.unique(filtered_time_diffs)) == 1 and np.isclose(std_sample_rate, 0) else False
     if not is_uniform and not mute_logging:
         logger.info(f"non-uniform sampling rate detected: "
-                    f"{len(np.unique(time_diffs))} unique values with "
+                    f"{len(np.unique(filtered_time_diffs))} unique values with "
                     f"mean fs = {mean_sample_rate:.2f} ± {std_sample_rate:.2f} Hz")
-    elif len(np.unique(time_diffs)) == 1 and not mute_logging:
+    elif len(np.unique(filtered_time_diffs)) == 1 and not mute_logging:
         logger.info(f"uniform sampling rate detected: fs = {mean_sample_rate:.2f} Hz")
     return is_uniform, np.round(mean_sample_rate, 2), np.round(std_sample_rate, 2)
 
