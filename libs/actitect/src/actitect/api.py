@@ -1,10 +1,8 @@
-import hashlib
 import logging
 import os
 import urllib.error
 import urllib.request
 from importlib.metadata import version as _pkg_version
-from importlib.resources import files
 from pathlib import Path
 from typing import Optional, Union, Tuple, Dict
 

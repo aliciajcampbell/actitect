@@ -1,8 +1,9 @@
 
 <p align="center">
-  <img src="docs/logo.svg" alt="ActiTect logo" height="80" style="vertical-align:middle; margin-right:10px;">
-  <span style="font-size:2em; font-weight:bold;">ActiTect & RBDisco: Actigraphy Toolkit and RBD Prediction</span>
+  <img src="docs/logo.svg" alt="ActiTect logo" height="140" style="vertical-align:middle; margin-right:10px;">
 </p>
+
+# ActiTect & RBDisco: Actigraphy Toolkit and RBD Prediction
 
 ---
 
@@ -24,7 +25,13 @@ It provides a unified command-line and Python interface for loading and preproce
 used wearable devices. Core processing steps include resampling, bandpass filtering, auto-calibration,
 artifact removal, and sleep/non-wear segmentation, enabling harmonized analyses across cohorts and studies.
 The RBDisco plugin extends ActiTect with pretrained machine-learning models for the detection of 
-REM Sleep Behavior Disorder (RBD) from actigraphy recordings as described [here](https://arxiv.org/abs/2511.05221).
+REM Sleep Behavior Disorder (RBD) from actigraphy recordings.
+
+<figure>
+  <img src="docs/overview.png" alt="Pipeline overview" style="width:500px;">
+  <figcaption><em>Figure 1 – ActiTect/RBDisco overview: full description at https://arxiv.org/abs/2511.05221. </em></figcaption>
+</figure>
+
 
 ---
 
@@ -56,9 +63,11 @@ after this, you should see
 
 ## ActiTect Usage 
 
-<p align="center">
-  <img src="docs/demo_fig.png" alt="Demo actigraphy plot" width="600">
-</p>
+<figure>
+  <img src="docs/demo_fig.png" alt="demo actigraphy plot" style="width:500px;">
+  <figcaption><em>Figure 2 – Processed actigraphy data. </em></figcaption>
+</figure>
+
 
 You can use the general purpose actigraphy toolkit either as a CLI tool or directly via a light, pythonic API.
 The supported actigraphy file formats are

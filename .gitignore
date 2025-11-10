@@ -42,3 +42,5 @@ libs/actitect/src/actitect/config/experiment_root.local.json
 *.parquet
 *.back
 
+'!docs/**/*.png'
+
