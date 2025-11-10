@@ -1,7 +1,14 @@
-# ActiTect & RBDisco: Actigraphy Toolkit and RBD Prediction
+
+<p align="center">
+  <img src="docs/logo.svg" alt="ActiTect logo" height="80" style="vertical-align:middle; margin-right:10px;">
+  <span style="font-size:2em; font-weight:bold;">ActiTect & RBDisco: Actigraphy Toolkit and RBD Prediction</span>
+</p>
+
+---
+
 This repository hosts ActiTect, a general-purpose Python toolkit for actigraphy analysis(preprocessing,
 feature extraction, QC, and visualization), and RBDisco, an extension that provides reproducible pipelines and 
-pretrained models for RBD prediction from wrist actigraphy as described in: <mark>**TODO:URL**</mark>.
+pretrained models for RBD prediction from wrist actigraphy as described [here](https://arxiv.org/abs/2511.05221).
 <!-- [Introduction](#introduction)-->
 - [Overview](#overview)
 - [Installation](#installation)
@@ -9,13 +16,18 @@ pretrained models for RBD prediction from wrist actigraphy as described in: <mar
 - [RBDisco Usage](#rbdisco-usage) ([CLI](#rbdisco-usage) / [API](#rbdisco-api-usage))
 - [Citation](#citation)
 
+---
+
 ## Overview 
 ActiTect is a modular, open-source toolkit for standardized analysis of research-grade actigraphy data.
 It provides a unified command-line and Python interface for loading and preprocessing data from commonly 
 used wearable devices. Core processing steps include resampling, bandpass filtering, auto-calibration,
 artifact removal, and sleep/non-wear segmentation, enabling harmonized analyses across cohorts and studies.
 The RBDisco plugin extends ActiTect with pretrained machine-learning models for the detection of 
-REM Sleep Behavior Disorder (RBD) from actigraphy recordings as described in <mark>**TODO:URL**</mark>.
+REM Sleep Behavior Disorder (RBD) from actigraphy recordings as described [here](https://arxiv.org/abs/2511.05221).
+
+---
+
 ## Installation
 
 You can install the package from source with
@@ -40,7 +52,14 @@ after this, you should see
 2025-10-02 12:34:17 [INFO] Installation successful!
 ```
 
+---
+
 ## ActiTect Usage 
+
+<p align="center">
+  <img src="docs/demo_fig.png" alt="Demo actigraphy plot" width="600">
+</p>
+
 You can use the general purpose actigraphy toolkit either as a CLI tool or directly via a light, pythonic API.
 The supported actigraphy file formats are
 - **Axivity AX6:** `.cwa`
@@ -184,6 +203,8 @@ For users interested in only specific steps of the toolkit, they are accessible 
 
 For a detailed example on how to use each step, see this [example notebook](examples/actitect/actitect_api_example.ipynb).
 
+---
+
 ## RBDisco Usage
 To use RBDisco to make RBD status predictions for [suited actigraphy files](#actitect-usage-), make sure you
 1. Installed the RBDisco extension of ActiTect (see [Installation](#installation))
@@ -206,6 +227,7 @@ containing individual predictions and a `.json` file containing classification m
   We might provide a combined ActiTect + RBDisco CLI in the future, for now please use the separate CLIs or the API. 
 
 </details>
+
 
 #### RBDisco API usage
 Similar to the core ActiTect API, you can use `actitect.rbdisco.predict()` to use our pretrained models for RBD status 

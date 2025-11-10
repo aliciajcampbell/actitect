@@ -1,6 +1,10 @@
+import hashlib
 import logging
 import os
+import urllib.error
+import urllib.request
 from importlib.metadata import version as _pkg_version
+from importlib.resources import files
 from pathlib import Path
 from typing import Optional, Union, Tuple, Dict
 
@@ -10,9 +14,9 @@ from matplotlib.figure import Figure
 
 from . import utils
 from .actimeter import ActimeterFactory
-from .vis import draw_actigraphy_data
-from .processing import filter_sptws, select_night_sptws, segment_nocturnal_movements
 from .features import compute_per_night_sleep_features
+from .processing import filter_sptws, select_night_sptws, segment_nocturnal_movements
+from .vis import draw_actigraphy_data
 
 logger = logging.getLogger(__name__)
 utils.setup_logging()
@@ -24,7 +28,8 @@ __all__ = [
     'load',
     'process',
     'plot',
-    'compute_sleep_motor_features'
+    'compute_sleep_motor_features',
+    'ensure_demo_asset'
 ]
 
 
@@ -106,13 +111,14 @@ def process(
     return df, device.get_info()
 
 
-def plot(df: pd.DataFrame, *, return_axes: bool = False) -> Union[Figure, Tuple[Figure, Axes]]:
+def plot(df: pd.DataFrame, *, return_axes: bool = False, dark_mode: bool = False) -> Union[Figure, Tuple[Figure, Axes]]:
     """ Plot raw or processed actigraphy data. Processed data will be plotted with the
     corresponding overlays; otherwise the plot falls back to a raw-only view.
 
     Parameters
         :param df: (pandas.DataFrame) Time-indexed dataframe, either from .load() or from .process().
         :param return_axes: (bool, default False) If True, also return the Matplotlib Axes used for plotting.
+        :param dark_mode: (bool, default False) If True, plot in dark mode.
 
     Returns
         :return fig: (matplotlib.figure.Figure) The created figure.
@@ -134,7 +140,7 @@ def plot(df: pd.DataFrame, *, return_axes: bool = False) -> Union[Figure, Tuple[
                 f"Plotting a long span ({span / pd.Timedelta(days=1):.1f} days) "
                 f"— consider downsampling or plotting a subset for readability.")
 
-    fig, ax = draw_actigraphy_data(df, raw_only=not data_is_processed)
+    fig, ax = draw_actigraphy_data(df, raw_only=not data_is_processed, dark_mode=dark_mode)
     return (fig, ax) if return_axes else fig
 
 
@@ -157,3 +163,47 @@ def compute_sleep_motor_features(processed_df: pd.DataFrame, subject_id: Optiona
 
 def compute_daytime_motor_features(df: pd.DataFrame) -> None:
     raise NotImplementedError()
+
+
+def _fetch_release_asset(
+        owner: str,
+        repo: str,
+        filename: str,
+        dest: Union[Path, str],
+        tag: str = None,  # e.g. "v1.0.0"; None = latest
+        timeout: int = 30
+) -> Path:
+    """ Download <filename> from a GitHub Release into <dest>.
+     If already present, it is reused. Returns the local Path."""
+
+    out = Path(dest).joinpath(filename)
+    if out.is_file() and out.stat().st_size > 0:
+        logger.info(f"File '{filename}' already exists, skipping download.")
+        return out
+
+    _ = utils.check_make_dir(out.parent, use_existing=True, verbose=False)
+    url = (f"https://github.com/{owner}/{repo}/releases/download/{tag}/{filename}"
+           if tag else f"https://github.com/{owner}/{repo}/releases/latest/download/{filename}")
+    tmp = out.with_suffix(out.suffix + ".part")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "actitect-fetch/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r, tmp.open("wb") as f:
+            for chunk in iter(lambda: r.read(1024 * 1024), b""):
+                f.write(chunk)
+        tmp.replace(out)
+    except (urllib.error.HTTPError, urllib.error.URLError) as e:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"Failed to fetch asset from: {url} ({e})") from e
+    except Exception as e:
+        tmp.unlink(missing_ok=True)
+        raise
+    return out
+
+
+def ensure_demo_asset() -> Path:
+    return _fetch_release_asset(
+        owner='bozeklab',
+        repo='actitect',
+        filename='example.cwa',
+        dest=Path(__file__).parents[4].joinpath('examples'),
+    )

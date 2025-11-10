@@ -52,7 +52,8 @@ class HandlerShadeLine(HandlerBase):
         return [band, ln]
 
 
-def draw_actigraphy_data(df: pd.DataFrame, _sleep_log: pd.DataFrame = None, raw_only: bool = False):
+def draw_actigraphy_data(df: pd.DataFrame, _sleep_log: pd.DataFrame = None, raw_only: bool = False,
+                         dark_mode: bool = False, show_sleep_bouts: bool = False):
     @dataclass
     class Colors:
         x: str = '#6200EE'
@@ -61,6 +62,7 @@ def draw_actigraphy_data(df: pd.DataFrame, _sleep_log: pd.DataFrame = None, raw_
         sptw: str = 'gray'
         sb: str = 'gray'
         nw: str = 'r'
+        dm: str = 'whitesmoke'
 
     max_value, min_value = df[['x', 'y', 'z']].max().max(), df[['x', 'y', 'z']].min().min()
     maxrange = max(max_value, -1 * min_value)
@@ -72,17 +74,25 @@ def draw_actigraphy_data(df: pd.DataFrame, _sleep_log: pd.DataFrame = None, raw_
     fig, axes = plt.subplots(nrows=nrows, ncols=1, sharex=False, sharey=True, figsize=(10, nrows), dpi=100)
     plt.subplots_adjust(wspace=.1)
 
+    tick_color = Colors.dm if dark_mode else 'k'
+    spine_color = Colors.dm if dark_mode else 'k'
+    label_color = Colors.dm if dark_mode else 'k'
+    grid_major_color = tick_color
+    grid_minor_color = 'lightgrey' if dark_mode else 'grey'
+
+    if dark_mode:
+        fig.patch.set_facecolor('none')
+
     lbl_ax = fig.add_subplot(111, frameon=False)
     lbl_ax.tick_params(labelcolor='none', top=False, bottom=False, left=False, right=False)
     lbl_ax.grid(False)
-    lbl_ax.set_xlabel(r'time / h', fontsize=12, labelpad=15)
-    lbl_ax.set_ylabel(r'acceleration magnitude / $g$', fontsize=12, labelpad=20)
+    lbl_ax.set_xlabel(r'time / h', fontsize=12, labelpad=15, color=label_color)
+    lbl_ax.set_ylabel(r'acceleration magnitude / $g$', fontsize=12, labelpad=20, color=label_color)
 
     i = 1
     for day, group in grouped_days:
         ax = axes[i]
 
-        # ax.plot(group.index.to_numpy(), group['acc'].to_numpy(), c='k', zorder=200, alpha=.5)
         ax.plot(group.index.to_numpy(), group['x'].to_numpy(), c=Colors.x, zorder=2000, lw=1.4, alpha=1)
         ax.plot(group.index.to_numpy(), group['y'].to_numpy(), c=Colors.y, zorder=2000, lw=1, alpha=.95)
         ax.plot(group.index.to_numpy(), group['z'].to_numpy(), c=Colors.z, zorder=2000, lw=.6, alpha=.85)
@@ -90,8 +100,9 @@ def draw_actigraphy_data(df: pd.DataFrame, _sleep_log: pd.DataFrame = None, raw_
         if not raw_only:
             ax.fill_between(
                 group.index.to_numpy(), maxrange, minrange, where=group['sptw'], facecolor=Colors.sptw, alpha=.3)
-            ax.fill_between(
-                group.index.to_numpy(), maxrange, minrange, where=group['sleep_bout'], facecolor=Colors.sb, alpha=.5)
+            if show_sleep_bouts:
+                ax.fill_between(
+                    group.index.to_numpy(), maxrange, minrange, where=group['sleep_bout'], facecolor=Colors.sb, alpha=.5)
             ax.fill_between(group.index.to_numpy(), maxrange, minrange,
                             where=~(group['wear'].to_numpy()), facecolor=Colors.nw, alpha=.3)
 
@@ -107,14 +118,18 @@ def draw_actigraphy_data(df: pd.DataFrame, _sleep_log: pd.DataFrame = None, raw_
                     for _le in _log_entries:
                         if isinstance(_le, pd.Timestamp):
                             _le = _le.to_pydatetime()
-                        ax.axvline(_le, color='k', zorder=2000, lw=5)
-                        ax.axvline(_le, color='w', zorder=2100, lw=1, alpha=.8)
+                        if dark_mode:
+                            ax.axvline(_le, color='w', zorder=2000, lw=5)
+                            ax.axvline(_le, color='k', zorder=2100, lw=1, alpha=.8)
+                        else:
+                            ax.axvline(_le, color='k', zorder=2000, lw=5)
+                            ax.axvline(_le, color='w', zorder=2100, lw=1, alpha=.8)
 
         ax.yaxis.set_label_position('right')
         ax.set_ylabel(day.strftime("%A\n%d %B"), weight='bold', ha='left', va='center', rotation=0, fontsize='medium',
-                      color='k', labelpad=10)
-        ax.get_xaxis().grid(True, which='major', color='k', alpha=.75, lw=.75, zorder=100)
-        ax.get_xaxis().grid(True, which='minor', color='grey', alpha=.25, lw=.75, zorder=100)
+                      color=label_color, labelpad=10)
+        ax.get_xaxis().grid(True, which='major', color=grid_major_color, alpha=.75, lw=.75, zorder=100)
+        ax.get_xaxis().grid(True, which='minor', color=grid_minor_color, alpha=.25, lw=.75, zorder=100)
 
         ax.set_xlim(day, day + timedelta(days=1))
         ax.set_ylim(minrange, maxrange)
@@ -126,24 +141,26 @@ def draw_actigraphy_data(df: pd.DataFrame, _sleep_log: pd.DataFrame = None, raw_
             start=datetime.combine(day, time(0, 0, 0, 0)),
             end=datetime.combine(day + timedelta(days=1), time(0, 0, 0, 0)),
             freq='1h'), minor=True)
-        ax.tick_params(left=True, right=False, top=False, bottom=True)
-        ax.tick_params(which='major', direction='out', length=5, width=2)
-        # ax.minorticks_on()
-        ax.tick_params(which='minor', direction='out', length=3, width=1)
+        ax.tick_params(left=True, right=False, top=False, bottom=True, colors=tick_color, labelcolor=tick_color)
+        ax.tick_params(which='major', direction='out', length=5, width=2, colors=tick_color)
+        ax.tick_params(which='minor', direction='out', length=3, width=1, colors=tick_color)
 
         ax.spines['left'].set_visible(True)
-        ax.spines['left'].set_color('k')
+        ax.spines['left'].set_color(spine_color)
         ax.spines['left'].set_zorder(1000)
         ax.spines['left'].set_linewidth(1.2)
         ax.spines['bottom'].set_visible(True)
-        ax.spines['bottom'].set_color('k')
+        ax.spines['bottom'].set_color(spine_color)
         ax.spines['bottom'].set_zorder(1000)
         ax.spines['bottom'].set_linewidth(1.2)
 
-        ax.spines['right'].set_color('darkgrey')
-        ax.spines['top'].set_color('darkgrey')
+        ax.spines['right'].set_color(spine_color)
+        ax.spines['top'].set_color(spine_color)
 
-        ax.set_facecolor('whitesmoke')
+        if dark_mode:
+            ax.set_facecolor('none')
+        else:
+            ax.set_facecolor('whitesmoke')
         i += 1
 
     leg_ax = axes[0]
@@ -154,24 +171,26 @@ def draw_actigraphy_data(df: pd.DataFrame, _sleep_log: pd.DataFrame = None, raw_
                       mlines.Line2D([], [], color=Colors.z, lw=2, label=r'$\vec{a}_{z}$')]
     if isinstance(_sleep_log, pd.DataFrame):
         if not _sleep_log.empty:
-            legend_patches.append(mlines.Line2D([], [], color='k', lw=5, label=r'sleep log entry'))
+            legend_patches.append(mlines.Line2D([], [], color='w' if dark_mode else 'k', lw=5, label=r'sleep log entry'))
 
     if not raw_only:
         legend_patches.append(mlines.Line2D([], [], color=Colors.sptw, lw=5, alpha=.3, label=r'sleep window'))
-        legend_patches.append(mlines.Line2D([], [], color=Colors.sb, lw=5, alpha=.5, label=r'sleep bout'))
         legend_patches.append(mlines.Line2D([], [], color=Colors.nw, lw=5, label=r'non-wear'))
+        if show_sleep_bouts:
+            legend_patches.append(mlines.Line2D([], [], color=Colors.sb, lw=5, alpha=.5, label=r'sleep bout'))
 
     leg_ax.legend(handles=legend_patches, bbox_to_anchor=(0., 0., 1., 1.), loc='center', ncol=8, mode="best",
-                  borderaxespad=0, framealpha=0.6, frameon=True, fancybox=True)
+                  borderaxespad=0, framealpha=0.6, frameon=True, fancybox=True,
+                  labelcolor=label_color, facecolor='none' if dark_mode else None)
 
     fig.autofmt_xdate()
     axes[-1].set_xticklabels(['00:00', '04:00', '08:00', '12:00', '16:00', '20:00', '24:00'],
-                             fontweight='bold', fontsize='medium', ha='center')
+                             fontweight='bold', fontsize='medium', ha='center', color=label_color)
     axes[1].set_xticklabels(['00:00', '04:00', '08:00', '12:00', '16:00', '20:00', '24:00'],
-                            fontweight='bold', fontsize='small', ha='center')
+                            fontweight='bold', fontsize='small', ha='center', color=label_color)
     axes[1].xaxis.set_tick_params(pad=-4)
-    axes[-1].tick_params(rotation=0)
-    axes[1].tick_params(rotation=0, bottom=True, top=False, labeltop=True)
+    axes[-1].tick_params(rotation=0, labelcolor=label_color)
+    axes[1].tick_params(rotation=0, bottom=True, top=False, labeltop=True, labelcolor=label_color)
 
     # fig.tight_layout()
     del grouped_days

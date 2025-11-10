@@ -49,12 +49,15 @@ class ActimeterFactory:
             return device_class(
                 filepath=None, patient_id=patient_id, raw_df=data.copy(), header=header, **filtered_kwargs)
 
+        assert Path(data).is_file(), f"received file path ('{data}') is not a file."
         _ext = utils.get_file_extension(data)
         device_class = EXT_2_DEVICE_MAP.get(_ext)
 
         if device_class is None:
-            raise ValueError(f"file extension '{_ext}' is not supported."
-                             f"Available devices are: Axivity ('.cwa') and GENEActive ('.bin')")
+            raise ValueError(
+                f"file extension '{_ext}' is not supported. "
+                f"Available devices are: { {k: v.__name__ for k, v in EXT_2_DEVICE_MAP.items()} }."
+            )
         else:
 
             valid_keys = DEVICE_KWARGS_MAP.get(device_class, set())
