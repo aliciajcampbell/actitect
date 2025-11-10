@@ -244,14 +244,14 @@ pip install .
 --- 
 ## Citation
 ```
-@article{TODO,
-      title={TODO}, 
-      author={TODO},
-      year={TODO},
-      eprint={TODO},
-      archivePrefix={TODO},
-      primaryClass={TODO},
-      url={TODO}, 
+@misc{bertram2025actitectgeneralizablemachinelearning,
+      title={ActiTect: A Generalizable Machine Learning Pipeline for REM Sleep Behavior Disorder Screening through Standardized Actigraphy}, 
+      author={David Bertram and Anja Ophey and Sinah Röttgen and Konstantin Kuffer and Gereon R. Fink and Elke Kalbe and Clint Hansen and Walter Maetzler and Maximilian Kapsecker and Lara M. Reimer and Stephan Jonas and Andreas T. Damgaard and Natasha B. Bertelsen and Casper Skjaerbaek and Per Borghammer and Karolien Groenewald and Pietro-Luca Ratti and Michele T. Hu and Noémie Moreau and Michael Sommerauer and Katarzyna Bozek},
+      year={2025},
+      eprint={2511.05221},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2511.05221}, 
 }
 ```
 

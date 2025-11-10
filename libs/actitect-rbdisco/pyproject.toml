@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "actitect-rbdisco"
-version = "0.3.1"
+version = "1.0.0"
 description = "RBD Plugin for Actitect for RBD preditction from wrist actigraphy."
 readme = "README.md"
 requires-python = "==3.9.*"
