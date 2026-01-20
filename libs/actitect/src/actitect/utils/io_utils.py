@@ -19,7 +19,7 @@ from skopt.space import Dimension
 logger = logging.getLogger(__name__)
 
 __all__ = ['get_experiment_root', 'load_yaml_file', 'detect_csv_delimiter', 'read_meta_csv_to_df', 'dump_to_json',
-           'read_from_json', 'get_file_extension', 'check_make_dir']
+           'read_from_json', 'get_file_extension', 'check_make_dir', 'str_to_snake_case']
 
 
 def check_make_dir(dir_path: Path, use_existing=False, verbose=True, time_extension: bool = True):

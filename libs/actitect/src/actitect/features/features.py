@@ -1,5 +1,4 @@
 """ Functions to generate descriptive motion features from time-series data."""
-
 import gc
 from pathlib import Path
 import logging
