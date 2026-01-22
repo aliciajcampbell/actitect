@@ -12,7 +12,7 @@ from ..actimeter.settings import ResolveNwSleepParams
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['SleepDetector', 'select_night_sptws', 'filter_sptws']
+__all__ = ['SleepDetector', 'select_night_sptws', 'filter_sptws', 'mark_selected_sptws_in_info']
 
 
 @dataclass(frozen=True)
@@ -371,20 +371,54 @@ def select_night_sptws(processed_df: pd.DataFrame, params: ResolveNwSleepParams 
         night_start=params.night_start, night_end=params.night_end,
         during_night_h_thres=params.night_sptw_duration_during_night_h)
 
+    # handle empty sptws, i.e. no (valid) sptw in data
+    if sptws is None or sptws.empty:
+        logger.warning(
+            "select_night_sptws: no sptw segments found in processed_df. "
+            "Returning empty selection (all sptws will be filtered out)."
+        )
+        empty = pd.DataFrame(columns=["start_time", "end_time", "length(h)", "during_night", "selected", "sptw_idx"])
+        empty.index.name = "night"
+        return empty
+
     # select only sptws that correspond to nights: (i.e. begin/end in typical night window and long enough)
-    sptws['selected'] = sptws.apply(
-        lambda row: True if (row['during_night'] and row['length(h)'] > params.night_sptw_threshold_h) else False,
-        axis=1)
+    sptws = sptws.copy()
+    if "during_night" not in sptws.columns:
+        # should not happen if extract_segments(add_during_night_indicator=True) works, but be defensive
+        logger.warning("select_night_sptws: 'during_night' missing from extracted sptws; treating as False.")
+        sptws["during_night"] = False
+
+    if "length(h)" not in sptws.columns:
+        logger.warning("select_night_sptws: 'length(h)' missing from extracted sptws; treating as 0.")
+        sptws["length(h)"] = 0.0
+
+    sptws["selected"] = sptws.apply(
+        lambda row: True if (
+                    bool(row["during_night"]) and float(row["length(h)"]) > params.night_sptw_threshold_h) else False,
+        axis=1
+    )
+
     selected_sptws = sptws[sptws.selected].reset_index().rename(columns={'index': 'sptw_idx'})
     selected_sptws.index.name = 'night'
     del sptws
     return selected_sptws
 
 
-def filter_sptws(processed_df: pd.DataFrame, *, sptw_col: str = 'sptw', sleep_col: str = 'sleep_bout',
-                 inplace: bool = False) -> pd.DataFrame:
+def filter_sptws(
+        processed_df: pd.DataFrame,
+        *,
+        sptw_col: str = 'sptw',
+        sleep_col: str = 'sleep_bout',
+        inplace: bool = False,
+        selected_nights: Optional[pd.DataFrame] = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """ Constrain boolean masks 'sptw' and 'sleep_bout' to be True only within SPTWs
-    that qualify as selected nights. """
+    that qualify as selected nights.
+
+    Returns:
+        (df, selected_nights) where selected_nights is the table used for filtering.
+        This avoids recomputing selection when the caller already has it.
+    """
     assert utils.df_is_processed_and_valid(processed_df), (
         f"Invalid input DataFrame: expected processed actigraphy data with columns "
         f"{utils.PROCESSED_REQUIRED_COLS}; missing {tuple(utils.missing_processed_columns(processed_df))}."
@@ -394,16 +428,66 @@ def filter_sptws(processed_df: pd.DataFrame, *, sptw_col: str = 'sptw', sleep_co
         if col not in processed_df.columns:
             raise KeyError(f"Required column '{col}' not found in processed_df.")
 
-    selected_nights = select_night_sptws(processed_df)
+    selected_nights = selected_nights if selected_nights is not None else select_night_sptws(processed_df)
     df = processed_df if inplace else processed_df.copy()
 
     # Build a single boolean mask covering all selected SPTW intervals
     mask_selected = pd.Series(False, index=df.index)
-    for _, row in selected_nights.iterrows():
-        mask_selected |= (df.index >= row['start_time']) & (df.index <= row['end_time'])
+
+    if isinstance(selected_nights, pd.DataFrame) and not selected_nights.empty:
+        for _, row in selected_nights.iterrows():
+            if "start_time" not in row or "end_time" not in row:
+                continue
+            mask_selected |= (df.index >= row['start_time']) & (df.index <= row['end_time'])
+    else:
+        logger.warning("filter_sptws: no selected nights. Setting all '%s'/'%s' to False.", sptw_col, sleep_col)
 
     # Constrain masks to selected nights only
     df[sptw_col] = df[sptw_col] & mask_selected
     df[sleep_col] = df[sleep_col] & mask_selected
 
-    return df
+    return df, selected_nights
+
+
+def mark_selected_sptws_in_info(
+        info: dict, selected_nights: pd.DataFrame, *,  sptw_key: str = "sleep_segmentation") -> dict:
+    """
+    Add per-SPTW 'selected' flags into the device.get_info() dict, based on which SPTWs survive selection.
+
+    Rule:
+      - default selected=False for all info['processing'][sptw_key]['sptws'][*]
+      - set selected=True only for SPTWs that:
+          (a) are actually annotated in the processed df (implicitly, because selected_nights was derived from it)
+          (b) pass the select_night_sptws thresholds
+
+    Matching uses (start_time, end_time) exact equality (timestamps).
+    """
+    out = info  # in-place update (keeps backwards-compat behavior unless you prefer copy)
+    try:
+        sptws_dict = out.get("processing", {}).get(sptw_key, {}).get("sptws", {})
+        if not isinstance(sptws_dict, dict) or not sptws_dict:
+            return out
+
+        # build set of selected (start,end) pairs
+        selected_pairs = set()
+        if isinstance(selected_nights, pd.DataFrame) and not selected_nights.empty:
+            for _, row in selected_nights.iterrows():
+                if "start_time" in row and "end_time" in row:
+                    selected_pairs.add((pd.Timestamp(row["start_time"]), pd.Timestamp(row["end_time"])))
+
+        # default False; set True if pair matches
+        for k, s in sptws_dict.items():
+            try:
+                st = pd.Timestamp(s.get("start_time"))
+                et = pd.Timestamp(s.get("end_time"))
+            except Exception:
+                s["selected"] = False
+                continue
+            s["selected"] = (st, et) in selected_pairs
+
+        return out
+
+    except Exception as e:
+        logger.warning("mark_selected_sptws_in_info: failed to annotate info dict (%s: %s). Leaving info unchanged.",
+                       type(e).__name__, e)
+        return out

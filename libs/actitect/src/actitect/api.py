@@ -13,7 +13,7 @@ from matplotlib.figure import Figure
 from . import utils
 from .actimeter import ActimeterFactory
 from .features import compute_per_night_sleep_features
-from .processing import filter_sptws, select_night_sptws, segment_nocturnal_movements
+from .processing import filter_sptws, select_night_sptws, segment_nocturnal_movements, mark_selected_sptws_in_info
 from .vis import draw_actigraphy_data
 
 logger = logging.getLogger(__name__)
@@ -105,8 +105,9 @@ def process(
     df = device.process(
         resample_rate=resample_rate, lowpass_hz=lowpass_hz, highpass_hz=highpass_hz, calibrate=calibrate,
         detect_nonwear=detect_nonwear, detect_sleep=detect_sleep)
-    df = filter_sptws(df)  # filter to sptws that correspond to nights
-    return df, device.get_info()
+    df, selected_nights = filter_sptws(df)  # filter to sptws that correspond to nights
+
+    return df, mark_selected_sptws_in_info(device.get_info(), selected_nights)
 
 
 def plot(df: pd.DataFrame, *, return_axes: bool = False, dark_mode: bool = False) -> Union[Figure, Tuple[Figure, Axes]]:
@@ -150,7 +151,15 @@ def compute_sleep_motor_features(processed_df: pd.DataFrame, subject_id: Optiona
 
     # only in sptws that corresponds to a night of sleep
     selected_nights = select_night_sptws(processed_df)
-    logger.info(f"found {selected_nights.shape[0]} full nights of sleep in data.")
+    n_nights = int(selected_nights.shape[0])
+    logger.info(f"found {n_nights} full nights of sleep in data.")
+
+    if n_nights == 0:
+        logger.warning(
+            "compute_sleep_motor_features: no valid nights found (selected_nights is empty). "
+            "Returning empty feature DataFrame."
+        )
+        return pd.DataFrame()
 
     # find movement bouts in sleep
     move_segment_mask, move_segment_ids, move_stats = segment_nocturnal_movements(processed_df, selected_nights)
