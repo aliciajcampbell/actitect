@@ -160,6 +160,7 @@ class LoaderConfig(BaseConfig):
     included_local_features: List[str]
     included_global_features: List[str]
     rebalance_datasets: Optional[RebalanceDatasetsConfig] = None
+    group_level: Optional[str] = 'patient'  # or 'record', will decide aggregation level
 
 
 @dataclass

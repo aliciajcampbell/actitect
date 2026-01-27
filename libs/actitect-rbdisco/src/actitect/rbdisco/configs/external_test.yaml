@@ -1,7 +1,8 @@
 
 pretrained_model_dirs: [
   './ActiTect/libs/actitect-rbdisco/src/actitect/rbdisco/models/pretrained/singleCenterCore.joblib',
-  './ActiTect/libs/actitect-rbdisco/src/actitect/rbdisco/models/pretrained/multiCenterCore.joblib']  # can also use run_<>/models/.. dir...
+  './ActiTect/libs/actitect-rbdisco/src/actitect/rbdisco/models/pretrained/multiCenterCore.joblib',
+]  # can also use run_<>/models/.. dir...
 random_state: 42
 n_jobs: -1
 log_night_eval: false
@@ -23,6 +24,7 @@ data:
 
     feature_dir: './features/per_night'  # relative to patient_dir
     aggregation: [ 'mean', 'std', 'skew', 'kurt', 'mad', 'iqr', '10th_percentile', '90th_percentile' ]
+    group_level: 'patient'
     included_local_features: [
       # modes
       'mean_mag', 'std_mag', 'skew_mag', 'kurt_mag',

@@ -24,7 +24,7 @@ class DataLoader:
                  feature_dir: Path, aggregation: List[str],
                  included_local_features: List[str], included_global_features: List[str],
                  binary_mapping: dict, add_str_labels: bool = False, verbose: bool = True, shuffle: bool = True,
-                 rebalance_datasets: RebalanceDatasetsConfig = None):
+                 rebalance_datasets: RebalanceDatasetsConfig = None, group_level: str = 'patient'):
 
         self.dataset_is_pooled = isinstance(data_dir, list) and len(data_dir) > 1
         self.data_dirs = data_dir if isinstance(data_dir, list) else [data_dir]
@@ -34,6 +34,10 @@ class DataLoader:
             for file in list(base_dir.glob(f"*/{feature_dir}/*local*.csv"))  # single record/patient
                         + list(base_dir.glob(f"*/*/{feature_dir}/*local*.csv"))  # multi-record
         ])
+
+        if group_level not in ('patient', 'record'):
+            raise ValueError(f"group_level must be 'patient' or 'record', got: {group_level!r}")
+        self.group_level = group_level
 
         if len(self.local_feat_files) == 0:
             raise UserWarning(f"could not locate local feature files make sure '{self.data_dirs}' exists and "
@@ -69,7 +73,11 @@ class DataLoader:
             np.random.shuffle(self.records_train)
             np.random.shuffle(self.records_test)
 
-        self.train_id_map = self.test_id_map = None
+        self.train_id_map = None
+        self.test_id_map = None
+        self.train_group_map = None
+        self.test_group_map = None
+
         self.num_total_rbd = n_rbd_train + n_rbd_test
         self.num_total_hc = n_hc_train + n_hc_test
         self.num_total = self.num_total_rbd + self.num_total_hc
@@ -93,6 +101,16 @@ class DataLoader:
             train_index_mask = local_feat_df.record_key.isin(self.records_train)
             test_index_mask = local_feat_df.record_key.isin(self.records_test)
 
+            self.train_id_map = local_feat_df.loc[train_index_mask, "id"].to_numpy()
+            self.test_id_map = local_feat_df.loc[test_index_mask, "id"].to_numpy()
+
+            if self.group_level == "patient":
+                self.train_group_map = self.train_id_map
+                self.test_group_map = self.test_id_map
+            else:  # record
+                self.train_group_map = local_feat_df.loc[train_index_mask, "record_key"].to_numpy()
+                self.test_group_map = local_feat_df.loc[test_index_mask, "record_key"].to_numpy()
+
             if self.dataset_is_pooled and getattr(self, 'rebalance_datasets', None) \
                     and getattr(self.rebalance_datasets, 'method', None) not in (None, 'none'):
                 logger.warning(
@@ -115,8 +133,16 @@ class DataLoader:
                 y_str = feat_df_night.diagnosis if self.add_str_labels else None
                 train_index_mask = feat_df_night.record_key.isin(self.records_train)
                 test_index_mask = feat_df_night.record_key.isin(self.records_test)
-                self.train_id_map = feat_df_night[train_index_mask].id.to_numpy()
-                self.test_id_map = feat_df_night[test_index_mask].id.to_numpy()
+
+                self.train_id_map = feat_df_night.loc[train_index_mask, "id"].to_numpy()
+                self.test_id_map = feat_df_night.loc[test_index_mask, "id"].to_numpy()
+
+                if self.group_level == "patient":
+                    self.train_group_map = self.train_id_map
+                    self.test_group_map = self.test_id_map
+                else:  # record
+                    self.train_group_map = feat_df_night.loc[train_index_mask, "record_key"].to_numpy()
+                    self.test_group_map = feat_df_night.loc[test_index_mask, "record_key"].to_numpy()
 
                 # Apply dataset rebalancing (pooled only)
                 if self.dataset_is_pooled and getattr(self, 'rebalance_datasets', None) \
@@ -125,7 +151,11 @@ class DataLoader:
                         f" applying composite dataset resampling with 'method='{self.rebalance_datasets.method}'")
                     train_index_mask = self._apply_dataset_rebalancing(feat_df_night, train_index_mask)
                     # refresh train_id_map after rebalancing
-                    self.train_id_map = feat_df_night[train_index_mask].id.to_numpy()
+                    self.train_id_map = feat_df_night.loc[train_index_mask, "id"].to_numpy()
+                    if self.group_level == "patient":
+                        self.train_group_map = self.train_id_map
+                    else:
+                        self.train_group_map = feat_df_night.loc[train_index_mask, "record_key"].to_numpy()
                     self._log_rebalanced_train_summary(feat_df_night, train_index_mask)
 
             elif agg_level == 'patient':
@@ -147,8 +177,17 @@ class DataLoader:
                 y = feat_df_patient.ground_truth
                 train_index_mask = feat_df_patient.record_key.isin(self.records_train)
                 test_index_mask = feat_df_patient.record_key.isin(self.records_test)
-                self.train_id_map = feat_df_patient[train_index_mask].id.to_numpy()
-                self.test_id_map = feat_df_patient[test_index_mask].id.to_numpy()
+
+                if self.group_level == "record":
+                    logger.warning(
+                        "group_level='record' is incompatible with agg_level='patient' (already grouped by id). "
+                        "Falling back to patient grouping for FeatureSet.group."
+                    )
+
+                self.train_id_map = feat_df_patient.loc[train_index_mask, "id"].to_numpy()
+                self.test_id_map = feat_df_patient.loc[test_index_mask, "id"].to_numpy()
+                self.train_group_map = self.train_id_map
+                self.test_group_map = self.test_id_map
 
                 if self.dataset_is_pooled and getattr(self, 'rebalance_datasets', None) \
                         and getattr(self.rebalance_datasets, 'method', None) not in (None, 'none'):
@@ -210,11 +249,11 @@ class DataLoader:
 
         train_set = FeatureSet(
             x=x_train, y=y_train, y_str=y_str_train,  # data and labels
-            group=self.train_id_map, feat_map=feat_map, dataset=train_dataset_ids  # mappings
+            group=self.train_group_map, feat_map=feat_map, dataset=train_dataset_ids  # mappings
         )
         test_set = FeatureSet(
             x=x_test, y=y_test, y_str=y_str_test,
-            group=self.test_id_map, feat_map=feat_map, dataset=test_dataset_ids
+            group=self.test_group_map, feat_map=feat_map, dataset=test_dataset_ids
         )
 
         return train_set, test_set, class_weights_train
@@ -256,9 +295,21 @@ class DataLoader:
         if y_array.size > 0 and not np.array_equal(np.unique(y_array), [0, 1]):
             raise AssertionError(f"{name} contains non-binary labels: {np.unique(y_array)}")
 
-    def _get_meta(self, meta_csv_path: Path):
-        # read meta file
+    @staticmethod
+    def _meta_make_record_keys(meta_df: pd.DataFrame) -> pd.Series:
+        """Return record_key series from meta_df rows: ID or ID_record_ID if present."""
+        rid = meta_df.get("record_ID")
+        if rid is None:
+            return meta_df["ID"].astype(str)
 
+        rid = rid.astype(str).str.strip()
+        is_missing = meta_df["record_ID"].isna() | rid.str.lower().isin({"none", ""})
+        return pd.Series(np.where(is_missing, meta_df["ID"].astype(str), meta_df["ID"].astype(str) + "_" + rid),
+                         index=meta_df.index)
+
+    def _get_meta(self, meta_csv_path: Path):
+
+        # read meta file
         meta_df = utils.read_meta_csv_to_df(meta_csv_path, exclude=True, verbose=self.verbose)
 
         assert 'diagnosis' in meta_df.columns, f"'meta_df' at {meta_csv_path} must contain a 'diagnosis' column."
@@ -397,13 +448,87 @@ class DataLoader:
         return _local_feat_df
 
     def _log_info_(self, n_rbd_train, n_hc_train, n_rbd_test, n_hc_test):
+
+        # --- meta-level counts (after diagnosis filtering / exclusions) ---
+        n_records = int(self.meta_df.shape[0])
+
+        # record_key is what the file layout and train/test split are based on
+        _rk = self.meta_df.apply(
+            lambda row: row['ID'] if pd.isna(row.get('record_ID')) else f"{row['ID']}_{str(row['record_ID']).strip()}",
+            axis=1
+        )
+        n_unique_records = int(_rk.nunique())
+
+        n_subjects = int(self.meta_df['ID'].nunique())
+
+        # subject-level labels (assert consistency across records for the same subject)
+        per_subject = self.meta_df.groupby('ID')['binary_label'].nunique()
+        if (per_subject > 1).any():
+            inconsistent = per_subject[per_subject > 1].index.tolist()
+            logger.warning(
+                "Found %d subject(s) with inconsistent binary_label across records (showing up to 10): %s",
+                len(inconsistent), inconsistent[:10]
+            )
+        subj_labels = self.meta_df.groupby('ID')['binary_label'].first()
+        n_rbd_subjects = int((subj_labels == 1).sum())
+        n_hc_subjects = int((subj_labels == 0).sum())
+
+        # record-level labels (rows)
+        n_rbd_records = int((self.meta_df['binary_label'] == 1).sum())
+        n_hc_records = int((self.meta_df['binary_label'] == 0).sum())
+
+        # group-level (how FeatureSet.group will be constructed for night/move level)
+        if self.group_level == 'patient':
+            n_groups = n_subjects
+            group_desc = "id"
+        else:
+            n_groups = n_unique_records
+            group_desc = "record_key"
+
         logger.info(
-            f"full dataset contains n = {self.num_total} patients:\n"
-            f"\t\t - n_rbd = {self.num_total_rbd} ({self.num_total_rbd / self.num_total * 100:.1f}%)\n"
-            f"\t\t - n_hc  = {self.num_total_hc} ({self.num_total_hc / self.num_total * 100:.1f}%)"
+            f"full dataset (meta): subjects = {n_subjects}, records = {n_unique_records} "
+            f"(rows = {n_records})"
         )
         logger.info(
-            f"train/test split:\n"
+            f"label distribution (meta): subjects -> rbd = {n_rbd_subjects} ({(n_rbd_subjects / n_subjects * 100) if n_subjects else 0:4.1f}%), "
+            f"hc = {n_hc_subjects} ({(n_hc_subjects / n_subjects * 100) if n_subjects else 0:4.1f}%) | "
+            f"records -> rbd = {n_rbd_records} ({(n_rbd_records / n_unique_records * 100) if n_unique_records else 0:4.1f}%), "
+            f"hc = {n_hc_records} ({(n_hc_records / n_unique_records * 100) if n_unique_records else 0:4.1f}%)"
+        )
+        logger.info(f"group_level = {self.group_level} (FeatureSet.group uses {group_desc}); n_groups = {n_groups}")
+
+        # --- train/test split summaries (meta-based) ---
+        train_meta = self.meta_df[self.meta_df['train/test'] == 'train']
+        test_meta = self.meta_df[self.meta_df['train/test'] == 'test']
+
+        train_subjects = int(train_meta['ID'].nunique()) if not train_meta.empty else 0
+        test_subjects = int(test_meta['ID'].nunique()) if not test_meta.empty else 0
+
+        train_records = int(train_meta.apply(
+            lambda row: row['ID'] if pd.isna(row.get('record_ID')) else f"{row['ID']}_{str(row['record_ID']).strip()}",
+            axis=1
+        ).nunique()) if not train_meta.empty else 0
+
+        test_records = int(test_meta.apply(
+            lambda row: row['ID'] if pd.isna(row.get('record_ID')) else f"{row['ID']}_{str(row['record_ID']).strip()}",
+            axis=1
+        ).nunique()) if not test_meta.empty else 0
+
+        if self.group_level == 'patient':
+            train_groups = train_subjects
+            test_groups = test_subjects
+        else:
+            train_groups = train_records
+            test_groups = test_records
+
+        logger.info(
+            f"split summary (meta): train subjects = {train_subjects}, train records = {train_records}, train groups = {train_groups} | "
+            f"test subjects = {test_subjects}, test records = {test_records}, test groups = {test_groups}"
+        )
+
+        # keep the existing record-wise label logging (backwards compatible with old expectations)
+        logger.info(
+            f"train/test split (records):\n"
             f"\t\t - train: n = {n_rbd_train + n_hc_train:2.0f},"
             f"rbd = {n_rbd_train:2.0f} "
             f"({n_rbd_train / (n_rbd_train + n_hc_train) * 100 if n_rbd_train + n_hc_train != 0 else 0:4.1f}%)"
@@ -417,7 +542,7 @@ class DataLoader:
         )
 
         if self.dataset_is_pooled:
-            logger.info("Dataset-wise contributions:")
+            logger.info("Dataset-wise contributions (records):")
             for dataset_id in sorted(self.meta_df['dataset_id'].unique()):
                 df_subset = self.meta_df[self.meta_df['dataset_id'] == dataset_id]
                 for split in ['train', 'test']:
@@ -665,19 +790,46 @@ class DataLoader:
                 dataset_id=lambda d: d['id'].map(self.map_subject_to_dataset) if self.dataset_is_pooled else 'SINGLE')
         )
 
-        # Totals
-        total = len(rec_df)
-        n_rbd = int((rec_df['ground_truth'] == 1).sum())
-        n_hc = total - n_rbd
-        p_rbd = (n_rbd / total * 100) if total else 0.0
-        p_hc = (n_hc / total * 100) if total else 0.0
+        # Subject-level view (may collapse multiple records to one subject)
+        subj_df = (
+            df_night.loc[train_index_mask, ['id', 'ground_truth']]
+            .drop_duplicates()
+            .assign(
+                dataset_id=lambda d: d['id'].map(self.map_subject_to_dataset) if self.dataset_is_pooled else 'SINGLE')
+        )
 
-        logger.info("[Rebalance][post] train split (records): n = %d", total)
-        logger.info("[Rebalance][post] \t - n_rbd = %d (%.1f%%)", n_rbd, p_rbd)
-        logger.info("[Rebalance][post] \t - n_hc  = %d (%.1f%%)", n_hc, p_hc)
+        n_records = len(rec_df)
+        n_subjects = len(subj_df)
+        if self.group_level == 'patient':
+            n_groups = n_subjects
+            group_desc = "id"
+        else:
+            n_groups = n_records
+            group_desc = "record_key"
+
+        # Totals (record-level + subject-level)
+        n_rbd_records = int((rec_df['ground_truth'] == 1).sum())
+        n_hc_records = n_records - n_rbd_records
+        p_rbd_records = (n_rbd_records / n_records * 100) if n_records else 0.0
+        p_hc_records = (n_hc_records / n_records * 100) if n_records else 0.0
+
+        n_rbd_subjects = int((subj_df['ground_truth'] == 1).sum())
+        n_hc_subjects = n_subjects - n_rbd_subjects
+        p_rbd_subjects = (n_rbd_subjects / n_subjects * 100) if n_subjects else 0.0
+        p_hc_subjects = (n_hc_subjects / n_subjects * 100) if n_subjects else 0.0
+
+        logger.info("[Rebalance][post] train split: subjects = %d, records = %d", n_subjects, n_records)
+        logger.info(
+            "[Rebalance][post] group_level = %s (FeatureSet.group uses %s); n_groups = %d",
+            self.group_level, group_desc, n_groups
+        )
+        logger.info("[Rebalance][post] label distribution (subjects): rbd = %d (%.1f%%), hc = %d (%.1f%%)",
+                    n_rbd_subjects, p_rbd_subjects, n_hc_subjects, p_hc_subjects)
+        logger.info("[Rebalance][post] label distribution (records):  rbd = %d (%.1f%%), hc = %d (%.1f%%)",
+                    n_rbd_records, p_rbd_records, n_hc_records, p_hc_records)
 
         if self.dataset_is_pooled:
-            logger.info("[Rebalance][post] Dataset-wise contributions (TRAIN):")
+            logger.info("[Rebalance][post] Dataset-wise contributions (TRAIN) (records):")
             for ds in sorted(rec_df['dataset_id'].unique()):
                 sub = rec_df[rec_df['dataset_id'] == ds]
                 t = len(sub)

@@ -11,7 +11,6 @@ from sklearn import metrics
 from actitect import utils
 from actitect.config import ExperimentConfig, NestedCVConfig
 from .types import FeatureSet, Fold
-
 from ..processing.aggregation import aggregate_night_predictions_to_patient_level
 from ..processing.classification_threshold import classify_with_threshold, eval_roc_and_pr_curves, ClassThreshold
 from ..processing.metrics import calc_evaluation_metrics
