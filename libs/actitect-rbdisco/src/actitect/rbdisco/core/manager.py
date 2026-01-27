@@ -75,8 +75,10 @@ class ModelManager:
 
     def eval(self, test: FeatureSet, model_dict_file: Path, train: FeatureSet = None, filter_min_nights: bool = True):
 
-        assert model_dict_file.is_file() and model_dict_file.suffix == '.joblib', \
-            f"Saved model file '{model_dict_file}' does not exist or is not a '.joblib' file."
+        suffixes = model_dict_file.suffixes
+        ok_ext = (suffixes == ['.joblib']) or (suffixes[-2:] == ['.joblib', '.back'])
+        assert model_dict_file.is_file() and ok_ext, \
+            f"Saved model file '{model_dict_file}' must end with '.joblib' or '.joblib.back'."
         model_dict = joblib.load(model_dict_file)
 
         with (utils.custom_tqdm(total=len(model_dict)) as pbar):
@@ -165,7 +167,7 @@ class ModelManager:
         for _model_save_path in model_save_path_list:
             _model_save_path = utils.check_make_dir(_model_save_path, use_existing=True, verbose=False)
             if 'singleCenter' in dataset_save_tag:
-                joblib.dump(core_model_dict, _model_save_path.joinpath(f'{dataset_save_tag}Core.joblib'))
+                self._dump_with_backup(core_model_dict, _model_save_path.joinpath(f'{dataset_save_tag}Core.joblib'))
                 if self.config.final_model.include_pretrain_merged and extend_train is not None and extended_model_dict:
                     self._dump_with_backup(
                         extended_model_dict, _model_save_path.joinpath(f'{dataset_save_tag}Extended.joblib'))
