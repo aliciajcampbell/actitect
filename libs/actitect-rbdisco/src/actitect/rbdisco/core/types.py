@@ -51,35 +51,67 @@ class FeatureSet:
     def copy(self):
         return deepcopy(self)
 
-    def select_features(self, feature_names: Union[list, np.ndarray]):
-        """Select a subset of features by name, preserving the order given in `feature_names`."""
+    def select_features(
+            self,
+            feature_names: Union[list, np.ndarray],
+            *,
+            order: str = "feat_map",
+            warn_missing: bool = True,
+    ):
+        """ Select a subset of features by name and return a new FeatureSet.
+        Backward-compatible default:
+          - order="feat_map": preserve the existing order of self.feat_map (legacy / safe for old models)
+        Optional:
+          - order="requested": preserve the order given in `feature_names` (useful if you explicitly want to reorder)
+        Parameters:
+            :param: feature_names: (List/array) of feature names to keep.
+            :param: order: (str) "feat_map" (default) or "requested".
+            :param: warn_missing: (bool) If True (default), logs a warning about missing feature names.
+        Returns:
+            :return: (FeatureSet) A new FeatureSet with x and feat_map restricted to the selected features."""
         assert self.feat_map is not None, "'feat_map' attribute must be set."
 
-        # Ensure array indexing works
         feat_map_arr = np.asarray(self.feat_map)
 
-        # Map name -> index in current FeatureSet
+        # membership lookup
         name_to_idx = {name: i for i, name in enumerate(feat_map_arr)}
+        requested = list(feature_names)
 
-        # Keep order of `feature_names`; drop those not present (warn)
-        selected_names = [n for n in feature_names if n in name_to_idx]
-        missing = [n for n in feature_names if n not in name_to_idx]
-        if missing:
-            logger.warning("select_features: %d feature(s) missing from feat_map (first few: %s)",
-                           len(missing), missing[:5])
+        missing = [n for n in requested if n not in name_to_idx]
+        if missing and warn_missing:
+            logger.warning(
+                "select_features: %d feature(s) missing from feat_map (first few: %s)",
+                len(missing), missing[:5]
+            )
 
-        if not selected_names:
+        if order == "feat_map":
+            # LEGACY / BACKCOMPAT: preserve feat_map order
+            requested_set = set(requested)
+            selected_indices = [i for i, name in enumerate(feat_map_arr) if name in requested_set]
+        elif order == "requested":
+            # EXPLICIT: preserve requested order, skipping missing
+            selected_indices = [name_to_idx[n] for n in requested if n in name_to_idx]
+        else:
+            raise ValueError("select_features: 'order' must be one of {'feat_map', 'requested'}.")
+
+        if not selected_indices:
             raise ValueError("select_features: none of the requested feature names are present.")
-
-        selected_indices = [name_to_idx[n] for n in selected_names]
 
         new_x = self.x[:, selected_indices]
         new_feat_map = feat_map_arr[selected_indices]
 
         return FeatureSet(
-            x=new_x, y=self.y, group=self.group, feat_map=new_feat_map,
-            process_params=self.process_params, prob=self.prob, dataset=self.dataset,
-            smote_mask=self.smote_mask, y_str=self.y_str, from_fold=self.from_fold, feat_rank=self.feat_rank
+            x=new_x,
+            y=self.y,
+            group=self.group,
+            feat_map=new_feat_map,
+            process_params=self.process_params,
+            prob=self.prob,
+            dataset=self.dataset,
+            smote_mask=self.smote_mask,
+            y_str=self.y_str,
+            from_fold=self.from_fold,
+            feat_rank=self.feat_rank,
         )
 
     def select_samples(self, sample_indices):
