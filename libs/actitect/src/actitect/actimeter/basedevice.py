@@ -305,7 +305,9 @@ class BaseDevice(ABC):
 
     @_processing_step('sleep_segmentation')
     def _segment_sleep_windows(self, x_df: pd.DataFrame):
-        """ Detect sleep segments in data, updates 'x_df' with boolean 'sleep' column and returns it."""
+        """ Detect sleep segments in data, updates 'x_df' with boolean 'sleep' column and returns it.
+        NOTE: Overwrites info['sleep_segmentation']['sptws'] with SPTWs re-derived from the FINAL
+        boolean masks in x_df (after ambiguity resolution), using utils.extract_segments. """
         _fs = (self.processing_info['resampling'].get('resample_fs_mean')
                or np.ceil(self.processing_info['resampling'].get('raw_fs_mean'))).astype('int')
 
@@ -328,6 +330,62 @@ class BaseDevice(ABC):
         else:
             logger.warning(f"(sleep: {self.meta['patient_id']}) it is recommended to perform "
                            f"non-wear segmentation before sleep analysis.")
+
+        try:  # overwrite the sptws in info with updated/resolved sptws, treating final df as source of truth
+            seg_sptw = utils.extract_segments(  # get sptw segments: (start, end, length)
+                x_df, column='sptw', condition=True, add_during_night_indicator=True,
+                night_start=self.resolve_nw_params.night_start, night_end=self.resolve_nw_params.night_end,
+                during_night_h_thres=self.resolve_nw_params.night_sptw_duration_during_night_h)
+
+            if seg_sptw is None or seg_sptw.empty:
+                sptws_new = {}
+                num_sptws_new = 0
+            else: # normalize expected columns from helper
+                len_col = 'length(h)'
+                if len_col not in seg_sptw.columns:  # be defensive if helper changes
+                    for c in seg_sptw.columns:
+                        if c.startswith('length(') and c.endswith(')'):
+                            len_col = c
+                            break
+
+                sptws_new = {}
+                for i, row in seg_sptw.reset_index(drop=True).iterrows():
+                    st = pd.Timestamp(row['start_time'])
+                    et = pd.Timestamp(row['end_time'])
+                    dur_h = float(row.get(len_col, np.nan))
+
+                    # simple overnight heuristic: crosses date OR end earlier-than-start clock time
+                    overnight = (st.normalize() != et.normalize()) or (et.hour < st.hour)
+
+                    sptws_new[int(i)] = dict(
+                        start_time=st,
+                        end_time=et,
+                        overnight=bool(overnight),
+                        **{"duration(h)": dur_h},
+                    )
+
+                num_sptws_new = len(sptws_new)
+
+            num_sleep_bouts_new = None  # optionally also refresh sleep-bout count from final mask
+            if 'sleep_bout' in x_df.columns:
+                seg_bouts = utils.extract_segments(
+                    x_df, column='sleep_bout', condition=True, add_during_night_indicator=False)
+                num_sleep_bouts_new = 0 if (seg_bouts is None or seg_bouts.empty) else int(len(seg_bouts))
+
+            # overwrite / update info
+            _info = dict(_info)  # ensure mutable copy
+            _info['sptws'] = sptws_new
+            _info['num_sptws'] = int(num_sptws_new)
+            if num_sleep_bouts_new is not None:
+                _info['num_sleep_bouts'] = int(num_sleep_bouts_new)
+
+        except Exception as e:
+            logger.warning(
+                "(sleep-segmentation: %s) Failed to overwrite SPTWs from final mask (%s: %s). "
+                "Keeping detector SPTWs in info.",
+                self.meta['patient_id'], type(e).__name__, e
+            )
+
         del _sptw
 
         self.processing_info['sleep_segmentation'].update(_info)
@@ -477,7 +535,7 @@ class BaseDevice(ABC):
 
     @classmethod
     def from_dataframe(cls, raw_df: pd.DataFrame, patient_id: str, header: Optional[dict] = None,
-            resolve_nw_params: ResolveNwSleepParams = None):
+                       resolve_nw_params: ResolveNwSleepParams = None):
         inst = cls(filepath=None, patient_id=patient_id, resolve_nw_params=resolve_nw_params)
         inst.set_raw_data(raw_df, header=header)
         return inst

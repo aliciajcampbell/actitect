@@ -394,7 +394,7 @@ def select_night_sptws(processed_df: pd.DataFrame, params: ResolveNwSleepParams 
 
     sptws["selected"] = sptws.apply(
         lambda row: True if (
-                    bool(row["during_night"]) and float(row["length(h)"]) > params.night_sptw_threshold_h) else False,
+                bool(row["during_night"]) and float(row["length(h)"]) > params.night_sptw_threshold_h) else False,
         axis=1
     )
 
@@ -450,44 +450,122 @@ def filter_sptws(
 
 
 def mark_selected_sptws_in_info(
-        info: dict, selected_nights: pd.DataFrame, *,  sptw_key: str = "sleep_segmentation") -> dict:
+        info: dict,
+        selected_nights: pd.DataFrame,
+        *,
+        sptw_key: str = "sleep_segmentation",
+        min_overlap_frac: float = 0.5,
+        tol: str = "2min",
+) -> dict:
     """
-    Add per-SPTW 'selected' flags into the device.get_info() dict, based on which SPTWs survive selection.
+    Annotate info['processing'][sptw_key]['sptws'][*]['selected'] based on selected_nights.
 
-    Rule:
-      - default selected=False for all info['processing'][sptw_key]['sptws'][*]
-      - set selected=True only for SPTWs that:
-          (a) are actually annotated in the processed df (implicitly, because selected_nights was derived from it)
-          (b) pass the select_night_sptws thresholds
+    IMPORTANT:
+      - Do NOT trust selected_nights['sptw_idx'] as it may be an index of extracted
+        segments after clipping/processing and can differ from info['...']['sptws'] keys.
+      - Match selected nights to info SPTWs by time overlap/containment.
 
-    Matching uses (start_time, end_time) exact equality (timestamps).
+    Parameters
+    ----------
+    min_overlap_frac:
+        Require at least this fraction of the selected_night interval to overlap with an info SPTW.
+    tol:
+        Tolerance applied when comparing/overlapping timestamps (handles minor timestamp jitter).
     """
-    out = info  # in-place update (keeps backwards-compat behavior unless you prefer copy)
+    out = info  # mutate in place (keeps your previous behavior)
     try:
         sptws_dict = out.get("processing", {}).get(sptw_key, {}).get("sptws", {})
         if not isinstance(sptws_dict, dict) or not sptws_dict:
             return out
 
-        # build set of selected (start,end) pairs
-        selected_pairs = set()
-        if isinstance(selected_nights, pd.DataFrame) and not selected_nights.empty:
-            for _, row in selected_nights.iterrows():
-                if "start_time" in row and "end_time" in row:
-                    selected_pairs.add((pd.Timestamp(row["start_time"]), pd.Timestamp(row["end_time"])))
+        # Default everything to False
+        for _, s in sptws_dict.items():
+            s["selected"] = False
 
-        # default False; set True if pair matches
+        if not isinstance(selected_nights, pd.DataFrame) or selected_nights.empty:
+            return out
+
+        tol_td = pd.to_timedelta(tol)
+
+        # Build candidate SPTW intervals from info
+        candidates = []
         for k, s in sptws_dict.items():
             try:
                 st = pd.Timestamp(s.get("start_time"))
                 et = pd.Timestamp(s.get("end_time"))
             except Exception:
-                s["selected"] = False
                 continue
-            s["selected"] = (st, et) in selected_pairs
+            if pd.isna(st) or pd.isna(et) or et <= st:
+                continue
+            candidates.append((k, st, et))
+
+        if not candidates:
+            return out
+
+        # Helper: compute overlap duration (seconds) between [a0,a1] and [b0,b1]
+        def _overlap_seconds(a0, a1, b0, b1) -> float:
+            left = max(a0, b0)
+            right = min(a1, b1)
+            if right <= left:
+                return 0.0
+            return (right - left).total_seconds()
+
+        # For each selected_night interval, find best matching info SPTW by overlap
+        matched_keys = []
+        for _, row in selected_nights.iterrows():
+            if "start_time" not in row or "end_time" not in row:
+                continue
+
+            try:
+                sel_st = pd.Timestamp(row["start_time"])
+                sel_et = pd.Timestamp(row["end_time"])
+            except Exception:
+                continue
+
+            if pd.isna(sel_st) or pd.isna(sel_et) or sel_et <= sel_st:
+                continue
+
+            # Expand selected interval slightly for jitter tolerance
+            sel_st2 = sel_st - tol_td
+            sel_et2 = sel_et + tol_td
+            sel_len = (sel_et - sel_st).total_seconds()
+
+            best = None  # (overlap_sec, key)
+            for k, st, et in candidates:
+                ov = _overlap_seconds(sel_st2, sel_et2, st, et)
+                if best is None or ov > best[0]:
+                    best = (ov, k)
+
+            if best is None:
+                continue
+
+            ov_sec, best_k = best
+            frac = (ov_sec / sel_len) if sel_len > 0 else 0.0
+
+            if frac >= float(min_overlap_frac):
+                # Mark the best matching SPTW as selected
+                sptws_dict[best_k]["selected"] = True
+                matched_keys.append(best_k)
+            else:
+                logger.warning(
+                    "mark_selected_sptws_in_info: could not confidently match selected interval "
+                    "[%s → %s] to any info SPTW (best overlap %.1f%%).",
+                    sel_st, sel_et, 100.0 * frac,
+                )
+
+        # If multiple selected intervals map to different SPTWs, log it (can happen)
+        uniq = sorted(set(matched_keys), key=lambda x: str(x))
+        if len(uniq) > 1:
+            logger.warning(
+                "mark_selected_sptws_in_info: multiple selected nights matched different SPTWs: %s",
+                uniq,
+            )
 
         return out
 
     except Exception as e:
-        logger.warning("mark_selected_sptws_in_info: failed to annotate info dict (%s: %s). Leaving info unchanged.",
-                       type(e).__name__, e)
+        logger.warning(
+            "mark_selected_sptws_in_info: failed to annotate info dict (%s: %s). Leaving info unchanged.",
+            type(e).__name__, e,
+        )
         return out
