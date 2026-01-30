@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 __all__ = ['segment_nocturnal_movements']
 
 
-def segment_nocturnal_movements(x_df: pd.DataFrame, selected_sptws: pd.DataFrame):
+def segment_nocturnal_movements(
+        x_df: pd.DataFrame, selected_sptws: pd.DataFrame) -> tuple[pd.Series, np.ndarray, dict[str, float]]:
     """ Identify movement segments in the sleep actimeter recordings based on thresholding the mean acceleration.
     Parameters:
         :param x_df: (pd.DataFrame) containing the entire recording of one patient/study. Must have a datetime index and
@@ -21,7 +22,12 @@ def segment_nocturnal_movements(x_df: pd.DataFrame, selected_sptws: pd.DataFrame
         :param selected_sptws: (pd.DataFrame) indicating the identified sleep period time windows in which to search
             for the movement bouts. Has to include columns 'start_time' and 'end_time'.
     Returns:
-        :return: (pd.DataFrame) The original DataFrame with an inplace update boolean column 'move'. """
+        :return: (tuple)
+            - segment_mask (pd.Series): Integer-labeled series (same index as x_df) identifying
+              consecutive movement/non-movement segments.
+            - move_segment_ids (np.ndarray): Array of segment IDs corresponding to movement segments.
+            - stats (dict[str, float]): Dictionary with summary statistics used for thresholding
+              ('mag_mean_sleep', 'mag_std_sleep', 'move_threshold')."""
 
     x_df.insert(3, 'mag', np.linalg.norm([x_df.x, x_df.y, x_df.z], axis=0))
 
@@ -37,7 +43,7 @@ def segment_nocturnal_movements(x_df: pd.DataFrame, selected_sptws: pd.DataFrame
     # check for movements in sleep (= simply defined as current acceleration > mean acceleration ± std)
     # if True, set movement to True, otherwise NaN (not False, see ffill(), bfill())
     x_df['movement'] = \
-        np.where((x_df['mag'] > move_threshold) & (x_df['sptw'] & x_df['wear'] & time_window_mask), 1, np.NaN, )
+        np.where((x_df['mag'] > move_threshold) & (x_df['sptw'] & x_df['wear'] & time_window_mask), 1, np.nan, )
     # calculate time difference between movements=True:
     with time_to_integer_index(x_df):
         time_diff = x_df.loc[x_df.movement == 1, 'time'].diff()
@@ -54,7 +60,7 @@ def segment_nocturnal_movements(x_df: pd.DataFrame, selected_sptws: pd.DataFrame
             # if movements are seperated more than 1s, separate them with 'False' seperator
             x_df.loc[time_diff[time_diff > datetime.timedelta(seconds=1)].index - 1, 'movement'] = 0
         else:
-            x_df['movement'] = np.NaN
+            x_df['movement'] = np.nan
     # backward and forward fill NaN values to separate the segments:
     x_df.movement = x_df.movement.bfill().ffill()
     df_astype_inplace(x_df, {'movement': bool})
