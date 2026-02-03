@@ -96,23 +96,25 @@ def _ensure_openmp():
 
 
 def _resolve_repo_root() -> Path:
+    """ Resolve the actitect repository root robustly, even if this code lives inside a git subtree.
+    Strategy:
+      1) Walk upwards from this install.py location and find a directory that contains:
+         - libs/actitect/pyproject.toml  (monorepo layout)
+         OR
+         - pyproject.toml                (single-package layout)
+      2) If not found, error out with a helpful message."""
     here = Path(__file__).resolve().parent
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=here, check=True, capture_output=True, text=True
-        )
-        git_root = Path(out.stdout.strip())
-        if git_root.exists():
-            return git_root
-    except Exception:
-        pass
-    # Walk upwards looking for sentinel files
-    sentinels = ("pyproject.toml", os.path.join("libs", "actitect", "pyproject.toml"))
+
+    # Sentinel patterns that define a "repo root" for this installer
+    sentinels = ('pyproject.toml', os.path.join('libs', 'actitect', 'pyproject.toml'),)
+
     for p in [here, *here.parents]:
         if any((p / s).exists() for s in sentinels):
             return p
-    logging.error("Could not locate repository root (no pyproject.toml found upwards from %s).", here)
+
+    logging.error("Could not locate actitect repository root from %s. "
+        "Expected to find pyproject.toml or libs/actitect/pyproject.toml in a parent directory.",
+        here)
     sys.exit(1)
 
 
