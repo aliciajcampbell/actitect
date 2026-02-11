@@ -5,9 +5,9 @@ pretrained_model_dirs: [
 ]  # can also use run_<>/models/.. dir...
 random_state: 42
 n_jobs: -1
-log_night_eval: false
-output_patient_csv: false
-extra_diagnostic_metrics: false
+log_night_eval: False
+output_patient_csv: False
+extra_diagnostic_metrics: False
 min_patient_nights_eval: 4
 
 data:
@@ -24,7 +24,9 @@ data:
 
     feature_dir: './features/per_night'  # relative to patient_dir
     aggregation: [ 'mean', 'std', 'skew', 'kurt', 'mad', 'iqr', '10th_percentile', '90th_percentile' ]
-    group_level: 'patient'
+    group_level: 'record'
+    # "patient" = group by subject ID (all records per subject together);
+    # "record" = group by record_key (each recording independent)
     included_local_features: [
       # modes
       'mean_mag', 'std_mag', 'skew_mag', 'kurt_mag',

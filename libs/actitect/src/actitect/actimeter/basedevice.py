@@ -110,6 +110,8 @@ class BaseDevice(ABC):
                 self.processing_info['resampling'].update({'raw_fs_is_uniform': _is_uniform, 'raw_fs_mean': _mean_fs,
                                                            'raw_fs_std': _std_fs, 'raw_num_ticks': raw_df.shape[0]})
 
+                self._set_logging_start_end_from_raw_df(raw_df, fs_hint=_mean_fs)
+
                 logger.info(f"(io: {self.meta['patient_id']}) successfully loaded raw data. ({load_timer()}s)")
                 return raw_df
             else:
@@ -142,6 +144,8 @@ class BaseDevice(ABC):
             'raw_fs_mean': mean_fs,
             'raw_fs_std': std_fs,
             'raw_num_ticks': raw_df.shape[0]})
+
+        self._set_logging_start_end_from_raw_df(raw_df, fs_hint=mean_fs)
 
     def process(self, resample_rate: Union[int, str] = 'infer', lowpass_hz: float = None, highpass_hz: float = None,
                 calibrate: bool = False, detect_nonwear: bool = False, detect_sleep: bool = False):
@@ -340,7 +344,7 @@ class BaseDevice(ABC):
             if seg_sptw is None or seg_sptw.empty:
                 sptws_new = {}
                 num_sptws_new = 0
-            else: # normalize expected columns from helper
+            else:  # normalize expected columns from helper
                 len_col = 'length(h)'
                 if len_col not in seg_sptw.columns:  # be defensive if helper changes
                     for c in seg_sptw.columns:
@@ -520,6 +524,65 @@ class BaseDevice(ABC):
             return self.load_raw_data()
         else:
             return self.raw_df
+
+    def _set_logging_start_end_from_raw_df(
+            self, raw_df: pd.DataFrame, *,
+            fs_hint: Optional[float] = None, store_under: str = 'processing.loading') -> None:
+        """Derive logging start/end from the raw_df datetime index and store it in processing_info.
+            - loggingStartTime: first timestamp in raw_df
+            - loggingEndTime:   end-exclusive timestamp (last timestamp + one sample interval if fs is known)"""
+        if raw_df is None or raw_df.empty:
+            logger.warning("(io: %s) raw_df empty; cannot derive logging start/end.", self.meta["patient_id"])
+            return
+
+        if not isinstance(raw_df.index, pd.DatetimeIndex):
+            logger.warning(
+                "(io: %s) raw_df index is not a DatetimeIndex (%s); cannot derive logging start/end.",
+                self.meta["patient_id"], type(raw_df.index))
+            return
+
+        start, last = raw_df.index.min(), raw_df.index.max()
+
+        # determine sample interval for end-exclusive timestamp
+        fs = None
+        # i. header fs if usable
+        header_fs = self.binary_header.get("sample_rate")
+        if isinstance(header_fs, (int, float)) and np.isfinite(header_fs) and header_fs > 0:
+            fs = float(header_fs)
+
+        # ii. explicit hint if provided
+        if fs is None and fs_hint is not None and np.isfinite(fs_hint) and fs_hint > 0:
+            fs = float(fs_hint)
+
+        # iii. compute from index diffs (fallback)
+        if fs is None:
+            try:
+                diffs = raw_df.index.to_series().diff().dropna().dt.total_seconds().to_numpy()
+                if diffs.size:
+                    dt_s = float(np.median(diffs[diffs > 0])) if np.any(diffs > 0) else float(np.median(diffs))
+                    if np.isfinite(dt_s) and dt_s > 0:
+                        fs = 1.0 / dt_s
+            except Exception:
+                fs = None
+
+        if fs is not None and fs > 0:
+            end = last + pd.to_timedelta(1.0 / fs, unit="s")  # end-exclusive
+        else:  # no fs → fall back to inclusive last timestamp (still useful)
+            end = last
+
+        # store, default: processing_info['loading'][...]
+        if store_under == 'processing.loading':
+            tgt = self.processing_info.setdefault('loading', {})
+        else:
+            # optionally allow other nesting later
+            tgt = self.processing_info.setdefault('loading', {})
+
+        tgt['loggingStartTime'], tgt['loggingEndTime'] = pd.Timestamp(start), pd.Timestamp(end)
+        try:
+            tgt['loggingDuration(s)'] = float((pd.Timestamp(end) - pd.Timestamp(start)).total_seconds())
+            tgt['loggingDuration(h)'] = float(tgt['loggingDuration(s)'] / 3600.0)
+        except Exception:
+            pass
 
     def get_info(self):
         return {'meta': self.meta, 'header': self.binary_header, 'processing': self.processing_info}

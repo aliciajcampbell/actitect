@@ -6,15 +6,12 @@ import logging.config
 import math
 import re
 import statistics
-from importlib.resources import files
 from pathlib import Path
-from typing import Iterable, Optional
-from typing import Union, Any
+from typing import Iterable, Optional, Union, Any, List
 
 import numpy as np
 import pandas as pd
 import yaml
-from skopt.space import Dimension
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +90,7 @@ def check_make_dir(dir_path: Path, use_existing=False, verbose=True, time_extens
 
 
 def get_experiment_root() -> Path:
+    from importlib.resources import files
     cfg_dir = files('actitect.config')
     for name in ('experiment_root.local.json', 'experiment_root.json'):
         p = cfg_dir / name
@@ -117,8 +115,8 @@ def load_yaml_file(path):
             logger.error(f"(io): error ({exc}) encountered while loading config {path}")
 
 
-def detect_csv_delimiter(filepath: Union[str, Path], *, sample_size: int = 1 << 14, possible: list[str] = None,
-                         fallback: str = ';'):
+def detect_csv_delimiter(filepath: Union[str, Path], *, sample_size: int = 1 << 14,
+                         possible: Optional[List[str]] = None, fallback: str = ';'):
     """Detect the delimiter of a csv file.
     Parameters
         :param filepath: (str) | pathlib.Path
@@ -359,6 +357,7 @@ def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False, verbose: bool 
 
 
 class CustomJsonEncoder(json.JSONEncoder):
+    from skopt.space import Dimension
     """Serializes numpy and pandas objects as JSON."""
 
     def default(self, obj):

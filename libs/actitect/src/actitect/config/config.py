@@ -55,7 +55,7 @@ class BaseConfig:
         return cls(**init_kwargs)
 
     @classmethod
-    def from_yaml(cls, yaml_path: Path = None, which: str = 'internal_cv') -> 'BaseConfig':
+    def from_yaml(cls, which: str, yaml_path: Path = None) -> 'BaseConfig':
         from importlib.resources import files as _pkg_files
         _rbdisco_configs = _pkg_files('actitect.rbdisco').joinpath('configs')
         if not yaml_path:
@@ -66,7 +66,9 @@ class BaseConfig:
             elif which == 'external_test':
                 yaml_path = _rbdisco_configs.joinpath('external_test.yaml')
             else:
-                raise ValueError(f'Unknown value for {which}: {yaml_path}')
+                raise ValueError(
+                    f"Unknown value for {which}: {yaml_path}, either directly set 'yaml_path' or choose"
+                    f" 'which' from 'internal_cv', 'external_cv' or 'external_test'.")
 
         with yaml_path.open('r') as file:
             config_dict = yaml.safe_load(file)
