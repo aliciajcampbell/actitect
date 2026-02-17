@@ -406,45 +406,98 @@ class DataLoader:
 
     def _create_local_feature_dataframe(self, util_cols: List[str] = None):
         if self.verbose:
-            logger.info('creating local feature DataFrame... ')
-        util_cols = util_cols if util_cols else [
-            'id', 'record_id', 'diagnosis', 'time_start', 'time_end', 'time_diff', 'sptw_start',
-            'sptw_end', 'sptw_idx', 'night', 'runtime', 'ident']
+            logger.info("creating local feature DataFrame... ")
+
+        # required for downstream logic
+        required_util_cols = ["id", "diagnosis", "time_start", "time_end", "time_diff", "night"]
+        # optional / backwards-compatible
+        default_optional_util_cols = ["record_id", "sptw_start", "sptw_end", "sptw_idx", "runtime", "ident"]
+        optional_util_cols = util_cols if util_cols is not None else default_optional_util_cols
 
         with utils.Timer() as timer:
             _li = []
 
             for filename in self.local_feat_files:
                 _df = pd.read_csv(filename, index_col=None, header=0)
-                _df = _df.loc[:, ~_df.columns.str.contains('Unnamed')]  # drop all columns with 'Unnamed' (old indices)
-                _df['ident'] = filename
-                if not _df.empty:
-                    _record_id_missing = 'record_id' not in _df.columns
-                    if _record_id_missing:
-                        _df['record_id'] = None
+                _df = _df.loc[:, ~_df.columns.str.contains("Unnamed")]  # drop old indices
 
-                    _df = _df[self.included_local_features + util_cols]
-                    _df['record_id'] = _df['record_id'].astype(str).str.strip()
-                    _df['record_id'] = _df['record_id'].replace(['none', 'NaN', 'nan', 'None'], None)
-                    _df['record_key'] = _df.apply(lambda row: row['id'] if row['record_id'] is None
-                    else f"{row['id']}_{row['record_id']}", axis=1)
-                    _li.append(_df)
+                if _df.empty:
+                    continue
+
+                # always add ident for debugging / traceability
+                _df["ident"] = filename
+
+                # ensure record_id exists (needed to build record_key)
+                if "record_id" not in _df.columns:
+                    _df["record_id"] = None
+
+                # enforce required util columns
+                missing_required = [c for c in required_util_cols if c not in _df.columns]
+                if missing_required:
+                    raise UserWarning(f"{filename.name}: missing required column(s): {missing_required}")
+
+                # enforce that requested local features exist
+                missing_feats = [c for c in self.included_local_features if c not in _df.columns]
+                if missing_feats:
+                    raise UserWarning(f"{filename.name}: missing local feature column(s): {missing_feats[:10]}"
+                                      f"{'...' if len(missing_feats) > 10 else ''}")
+
+                # keep only optional util cols that actually exist (plus always keep record_id + ident)
+                optional_present = [c for c in optional_util_cols if c in _df.columns]
+                keep_cols = (
+                        list(self.included_local_features)
+                        + required_util_cols
+                        + ["record_id", "ident"]
+                        + [c for c in optional_present if c not in {"record_id", "ident"}]
+                )
+
+                # select columns (robust against missing optional columns)
+                _df = _df[keep_cols]
+
+                # normalize record_id and build record_key
+                _df["record_id"] = _df["record_id"].astype(str).str.strip()
+                _df["record_id"] = _df["record_id"].replace(["none", "NaN", "nan", "None", ""], None)
+                _df["record_key"] = _df.apply(
+                    lambda row: row["id"] if row["record_id"] is None else f"{row['id']}_{row['record_id']}",
+                    axis=1
+                )
+
+                _li.append(_df)
+
+            if len(_li) == 0:
+                raise UserWarning("No non-empty local feature files found after loading.")
 
             _local_feat_df = pd.concat(_li, axis=0, ignore_index=True)
-            _local_feat_df['month'] = pd.to_datetime(_local_feat_df.time_start).dt.month
-            _local_feat_df['day'] = pd.to_datetime(_local_feat_df.time_start).dt.day
-            _local_feat_df['hour'] = pd.to_datetime(_local_feat_df.time_start).dt.hour
-            _local_feat_df['minute'] = pd.to_datetime(_local_feat_df.time_start).dt.minute
+
+            # derived time columns
+            _local_feat_df["month"] = pd.to_datetime(_local_feat_df.time_start).dt.month
+            _local_feat_df["day"] = pd.to_datetime(_local_feat_df.time_start).dt.day
+            _local_feat_df["hour"] = pd.to_datetime(_local_feat_df.time_start).dt.hour
+            _local_feat_df["minute"] = pd.to_datetime(_local_feat_df.time_start).dt.minute
 
             # 'toilette' filter
-            _local_feat_df = _local_feat_df[(_local_feat_df.time_diff < 50) & (_local_feat_df.time_diff > .5)]
-            _local_feat_df['ground_truth'] = _local_feat_df.diagnosis.map(self.binary_mapping).values
+            _local_feat_df = _local_feat_df[(_local_feat_df.time_diff < 50) & (_local_feat_df.time_diff > 0.5)]
+
+            # labels
+            _local_feat_df["ground_truth"] = _local_feat_df.diagnosis.map(self.binary_mapping).values
+
+            # handle problematic values in feature columns only
+            excluded_cols = required_util_cols + ["record_id", "ident", "record_key", "diagnosis", "ground_truth",
+                                                  "month", "day", "hour", "minute"]
+            # include optional cols too (if present) so they won't be treated as features
+            excluded_cols += [c for c in optional_util_cols if c in _local_feat_df.columns]
+
             _local_feat_df = utils.handle_problematic_values_in_feature_df(
-                _local_feat_df, drop=True, replace=None, df_log_name='local_feat_df', excluded_cols=util_cols,
-                verbose=self.verbose)
+                _local_feat_df,
+                drop=True,
+                replace=None,
+                df_log_name="local_feat_df",
+                excluded_cols=excluded_cols,
+                verbose=self.verbose,
+            )
 
         if self.verbose:
-            logger.info(f'creating local feature DataFrame... done. ({timer()}s)')
+            logger.info(f"creating local feature DataFrame... done. ({timer()}s)")
         return _local_feat_df
 
     def _log_info_(self, n_rbd_train, n_hc_train, n_rbd_test, n_hc_test):
@@ -565,7 +618,7 @@ class DataLoader:
 
         return utils.handle_problematic_values_in_feature_df(
             global_feat_df, drop=True, replace=None, df_log_name='global_feat_df',
-            excluded_cols=['record_key', 'id', 'record_id', 'diagnosis', 'ground_truth'],
+            excluded_cols=['record_key', 'id', 'record_id', 'diagnosis', 'ground_truth', 'block_id'],
             verbose=self.verbose)
 
     def _create_global_feature_dataframe(self, local_df_copy: pd.DataFrame, use_numba: bool = True,
@@ -581,6 +634,9 @@ class DataLoader:
             ].drop_duplicates().reset_index(drop=True)
         else:  # aggregate local features
             global_feat_df = self._aggregate_local_to_global(local_df_copy, use_numba=use_numba)
+
+        if not self.included_global_features:
+            return global_feat_df  # if no global features requested, return early with only aggregated local feats
 
         for _record_key, _id, _record_id in zip(
                 global_feat_df.record_key.unique(), global_feat_df.groupby('record_key')['id'].first(),

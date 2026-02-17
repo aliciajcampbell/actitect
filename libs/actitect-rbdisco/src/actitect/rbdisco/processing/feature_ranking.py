@@ -116,12 +116,29 @@ class FeatureRanker:
                 ['name', 'rank']].sort_values(by='name').set_index('name')
             _weight_arr.append(_method_weight)
 
-        # aggregate rankings and produce ensemble ranking
-        rank_df['mean_rank'] = rank_df.mean(axis=1).astype('int')
-        rank_df['weighted_mean'] = np.average(rank_df.drop(columns='mean_rank'), axis=1, weights=_weight_arr).astype(
-            'int')
+        # aggregate rankings and produce ensemble ranking (NaN-aware)
+        method_cols = [c for c in rank_df.columns]  # currently only method columns at this point
+        values = rank_df[method_cols].to_numpy(dtype=float)
+        weights = np.array(_weight_arr, dtype=float)
+
+        mask = ~np.isnan(values)
+
+        # mean rank ignoring NaNs
+        mean_rank = np.nanmean(values, axis=1)
+
+        # weighted mean ignoring NaNs, with per-row weight renormalization
+        weighted_sum = np.nansum(values * weights, axis=1)
+        weight_den = np.sum(mask * weights, axis=1)
+        weighted_mean = weighted_sum / np.where(weight_den == 0, np.nan, weight_den)
+
+        rank_df['mean_rank'] = mean_rank
+        rank_df['weighted_mean'] = weighted_mean
         rank_df['diff_weight_mean'] = rank_df['weighted_mean'] - rank_df['mean_rank']
-        rank_df['total_rank'] = stats.rankdata(rank_df['weighted_mean'], method='max')
+
+        # rankdata cannot handle NaN well: push NaNs to bottom by temporary fill with +inf
+        _tmp = rank_df['weighted_mean'].to_numpy()
+        _tmp = np.where(np.isnan(_tmp), np.inf, _tmp)
+        rank_df['total_rank'] = stats.rankdata(_tmp, method='max')
         rank_df = rank_df.reset_index().sort_values(by='total_rank').set_index('total_rank')
         rank_df.to_csv(self.out_dir.joinpath(self.ranking_file_postfix))
 
@@ -231,56 +248,91 @@ class FeatureRanker:
             x_train_df = pd.DataFrame(self.data.x, columns=self.data.feat_map)
             y_true_train_df = pd.Series(self.data.y)
 
-            ranking = pd.DataFrame({'name': _feat_map, 'rank': np.zeros(len(_feat_map), dtype=int)})
+            n_feats = len(_feat_map)
+            _K, _n_jobs = n_feats, 1
 
-            selected, relevance, redundancy = mrmr_classif(  # note: avoid parallel processing for reproducibility
-                X=x_train_df, y=y_true_train_df, K=len(_feat_map), return_scores=True, n_jobs=1, show_progress=False)
+            if n_feats >= 1000:
+                _K = min(200, n_feats)
+                _n_jobs = -1
+                logger.warning(
+                    f"MRMR: large feature set detected (n_feats={n_feats}). "
+                    f"Using K={_K} and n_jobs={_n_jobs} for speed"
+                    f" → Unselected features will have rank=NaN and MRMR ranking is not deterministic anymore!")
 
-            feature_ranks = {feature: rank for rank, feature in enumerate(selected)}
-            for feature in _feat_map:
-                ranking.loc[ranking['name'] == feature, 'rank'] = int(feature_ranks[feature] + 1)
+            selected, relevance, redundancy = mrmr_classif(
+                X=x_train_df,
+                y=y_true_train_df,
+                K=_K,
+                return_scores=True,
+                n_jobs=_n_jobs,
+                show_progress=False
+            )
 
-            redundancy_matrix = np.array(redundancy)
-            symmetry_diff = redundancy_matrix - redundancy_matrix.T
-            _thresh = 1e-5
-            non_symmetric_indices = np.sum(np.abs(symmetry_diff) > _thresh)
+            # Full table over all features: MRMR ranks only for selected, NaN otherwise
+            ranking = pd.DataFrame({'name': _feat_map})
+            ranking['rank'] = np.nan  # IMPORTANT: NaN means "not ranked by MRMR"
 
-            if not np.allclose(redundancy_matrix, redundancy_matrix.T):
-                logger.debug(
-                    f"Redundancy matrix is not symmetric! "
-                    f"asymmetry at {_thresh}: {non_symmetric_indices}/"
-                    f"{redundancy_matrix.shape[0] * redundancy_matrix.shape[1]}"
-                    f"= {100 * non_symmetric_indices / (redundancy_matrix.shape[0] * redundancy_matrix.shape[1]):.2f}"
-                    f"%")
+            feature_ranks = {feature: rank for rank, feature in enumerate(selected)}  # 0..K-1
+            for feat in selected:
+                ranking.loc[ranking['name'] == feat, 'rank'] = int(feature_ranks[feat] + 1)
 
-            redundancy_matrix = redundancy.to_numpy()
-            # redundancy_matrix = (redundancy_matrix + redundancy_matrix.T) / 2
+            if _K == n_feats:
+                redundancy_matrix = np.array(redundancy)
+                symmetry_diff = redundancy_matrix - redundancy_matrix.T
+                _thresh = 1e-5
+                non_symmetric_indices = np.sum(np.abs(symmetry_diff) > _thresh)
 
-            ranking['relevance'] = np.round(relevance.to_numpy(), 3)
-            ranking['mean_redundancy_1'] = np.round(np.mean(redundancy_matrix, axis=0), 3)
-            ranking['mean_redundancy_2'] = np.round(np.mean(redundancy_matrix, axis=1), 3)
+                if not np.allclose(redundancy_matrix, redundancy_matrix.T):
+                    logger.debug(
+                        f"Redundancy matrix is not symmetric! "
+                        f"asymmetry at {_thresh}: {non_symmetric_indices}/"
+                        f"{redundancy_matrix.shape[0] * redundancy_matrix.shape[1]}"
+                        f"= {100 * non_symmetric_indices / (redundancy_matrix.shape[0] * redundancy_matrix.shape[1]):.2f}"
+                        f"%")
 
-            top3_redundant_features = []
-            for i, feature in enumerate(_feat_map):
-                redundant_indices = np.argsort(-redundancy_matrix[i])[:4]
-                redundant_features = [_feat_map[idx] for idx in redundant_indices if idx != i][:3]
-                top3_redundant_features.append(redundant_features)
-            ranking['top3_redundant'] = top3_redundant_features
+                redundancy_matrix = redundancy.to_numpy()
+                # redundancy_matrix = (redundancy_matrix + redundancy_matrix.T) / 2
 
-            if constant_flags.any():
-                ranking = pd.concat([ranking, pd.DataFrame({
-                    'name': list(_constant_dict.keys()),
-                    'rank': range(len(ranking) + 1, len(ranking) + 1 + len(_constant_dict)),
-                    'relevance': [np.nan] * len(_constant_dict),
-                    'mean_redundancy_1': [np.nan] * len(_constant_dict),
-                    'mean_redundancy_2': [np.nan] * len(_constant_dict),
-                    'top3_redundant': [np.nan] * len(_constant_dict),
-                })], ignore_index=True)
+                ranking['relevance'] = np.round(relevance.to_numpy(), 3)
+                ranking['mean_redundancy_1'] = np.round(np.mean(redundancy_matrix, axis=0), 3)
+                ranking['mean_redundancy_2'] = np.round(np.mean(redundancy_matrix, axis=1), 3)
 
-            ranking = ranking.sort_values(by='rank').set_index('rank')
+                top3_redundant_features = []
+                for i, feature in enumerate(_feat_map):
+                    redundant_indices = np.argsort(-redundancy_matrix[i])[:4]
+                    redundant_features = [_feat_map[idx] for idx in redundant_indices if idx != i][:3]
+                    top3_redundant_features.append(redundant_features)
+                ranking['top3_redundant'] = top3_redundant_features
+
+                if constant_flags.any():
+                    ranking = pd.concat([ranking, pd.DataFrame({
+                        'name': list(_constant_dict.keys()),
+                        'rank': range(len(ranking) + 1, len(ranking) + 1 + len(_constant_dict)),
+                        'relevance': [np.nan] * len(_constant_dict),
+                        'mean_redundancy_1': [np.nan] * len(_constant_dict),
+                        'mean_redundancy_2': [np.nan] * len(_constant_dict),
+                        'top3_redundant': [np.nan] * len(_constant_dict),
+                    })], ignore_index=True)
+            else:
+                ranking['relevance'] = np.nan
+                ranking['mean_redundancy_1'] = np.nan
+                ranking['mean_redundancy_2'] = np.nan
+                ranking['top3_redundant'] = np.nan
+
+                if constant_flags.any():
+                    ranking = pd.concat([ranking, pd.DataFrame({
+                        'name': list(_constant_dict.keys()),
+                        'rank': [np.nan] * len(_constant_dict),
+                        'relevance': [np.nan] * len(_constant_dict),
+                        'mean_redundancy_1': [np.nan] * len(_constant_dict),
+                        'mean_redundancy_2': [np.nan] * len(_constant_dict),
+                        'top3_redundant': [np.nan] * len(_constant_dict),
+                    })], ignore_index=True)
+
+            ranking = ranking.sort_values(by='rank', na_position='last').set_index('rank')
             ranking.to_csv(_out_dir.joinpath(f"mrmr_{self.data_config.agg_level}.csv"))
-
-            del redundancy_matrix
+            if 'redundancy_matrix' in locals():
+                del redundancy_matrix
             logger.info(f"applied MRMR. ({timer()}s)")
 
         return {f"{self.data_config.agg_level}": ranking}
