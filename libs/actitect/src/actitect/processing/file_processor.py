@@ -74,10 +74,16 @@ class FileProcessor:
                 # "delete_processed_files": operational_kwargs.delete_processed_files
             })
 
-        # 0. handle the deletion case (cleanup mode)
+        # 0.1 handle the deletion case (cleanup mode)
         if operational_kwargs.delete_processed_files:
             self._validate_and_perform_deletion()
             return  # exit process method
+
+        # 0.2 resume behavior (default on): skip work if outputs already exist
+        if getattr(operational_kwargs, "resume", True):
+            if self._is_complete(operational_kwargs):
+                logger.info(f"(io: {self.saving_suffix}): resume=True and outputs exist -> skipping.")
+                return
 
         # 1. apply processing if needed
         processed_df, self.info = self._load_or_process_data(operational_kwargs.redo_processing)
@@ -148,6 +154,29 @@ class FileProcessor:
     @property
     def has_been_processed(self):
         return self.parquet_path.exists()  # simply checks if the processed file exists
+
+    def _info_path(self) -> Path:
+        return self.recording_save_dir.joinpath(f"info-{self.saving_suffix}.json")
+
+    def _feature_dir(self) -> Path:
+        return self.recording_save_dir.joinpath(f"features/{self.feat_kwargs['mode']}/")
+
+    def _global_feat_path(self) -> Path:
+        return self._feature_dir().joinpath(f"global-features-{self.saving_suffix}.csv")
+
+    def _local_feat_path(self) -> Path:
+        return self._feature_dir().joinpath(f"local-features-{self.saving_suffix}.csv")
+
+    def _is_complete(self, operational_kwargs: Namespace) -> bool:
+        """Defines what 'done' means for resume mode.
+        - If skip_feature_calc is False (default): require info.json + global/local feature CSVs
+        - If skip_feature_calc is True: require at least the processed parquet + info.json
+          (since features are intentionally not produced)"""
+        info_ok = self._info_path().exists()
+        if operational_kwargs.skip_feature_calc:
+            return info_ok and self.parquet_path.exists()
+        # normal full pipeline
+        return info_ok and self._global_feat_path().exists() and self._local_feat_path().exists()
 
     def _load_info(self):
         with open(self.recording_save_dir.joinpath(f"info-{self.saving_suffix}.json"), 'r') as f:

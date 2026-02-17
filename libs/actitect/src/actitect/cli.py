@@ -12,9 +12,16 @@ from .actimeter import SUPPORTED_FILETYPES
 from .processing.file_processor import FileProcessor
 
 
+def _resolve_path(root_dir: str, maybe_path: str) -> Path:
+    """Backwards-compatible path resolver:
+    - absolute paths are used as-is
+    - relative paths are interpreted relative to root_dir."""
+    p = Path(maybe_path)
+    return p if p.is_absolute() else Path(root_dir).joinpath(p)
+
 def _process_dataset(args: argparse.Namespace, processing_kwargs: dict, feature_kwargs: dict, logger: logging.Logger):
-    _data_dir = Path(args.root_dir).joinpath(args.data_dir)
-    _meta_file = Path(args.root_dir).joinpath(args.meta_file)
+    _data_dir = _resolve_path(args.root_dir, args.data_dir)
+    _meta_file = _resolve_path(args.root_dir, args.meta_file)
     assert _data_dir.is_dir(), f"the passed 'data_dir' must exist and be a directory! ({_data_dir})."
     assert _meta_file.is_file(), f"can't find 'metadata.csv' file {_meta_file}."
 
@@ -23,7 +30,7 @@ def _process_dataset(args: argparse.Namespace, processing_kwargs: dict, feature_
 
     if not _raw_files:
         raise UserWarning(f"No actigraphy files found at {_data_dir}")
-    save_dir = utils.check_make_dir(Path(args.root_dir).joinpath(args.out_dir), use_existing=True)
+    save_dir = utils.check_make_dir(_resolve_path(args.root_dir, args.out_dir), use_existing=True)
 
     _excluded = {}
     with utils.custom_tqdm(total=len(_raw_files), position=0, leave=True) as pbar:
@@ -92,25 +99,25 @@ def _parse_args():
     parser.add_argument(
         '-c', '--config_file', type=str,
         default='./actitect/libs/actitect/src/actitect/config/default_preprocessing.yaml',
-        help='Location of the config .yaml file that defines preprocessing settings.'
+        help='Path to preprocessing config YAML. Absolute path or relative to –root_dir.'
     )
 
     parser.add_argument(
         '-d', '--data_dir', type=str,
         default='./data/raw/',
-        help="The directory containing the raw actigraphy files, relative to --root_dir."
+        help="Path to the directory containing raw actigraphy files. Absolute path or relative to –root_dir"
     )
 
     parser.add_argument(
         '-m', '--meta_file', type=str,
         default='./data/meta/metadata.csv',
-        help="The path to the metadata.csv, relative to --root_dir."
+        help="Path to metadata.csv. Absolute path or relative to –root_dir."
     )
 
     parser.add_argument(
         '-o', '--out_dir', type=str,
         default='./data/processed/',
-        help="The directory used to store the features of each subject, relative to --root_dir."
+        help="Output directory for processed data/features. Absolute path or relative to –root_dir."
     )
 
     # operational arguments
@@ -118,6 +125,13 @@ def _parse_args():
         '-ns', '--no-store', dest='save_processed',
         action='store_false', default=True,
         help='If used, will only save the calculated features, not the processed data.'
+    )
+
+    parser.add_argument(
+        '-nr','--no-resume', dest='resume',
+        action='store_false', default=True,  # True means 'args.resume' is True...
+        help='Disable resume behavior. By default, actitect-process will skip records that already have '
+             'the expected outputs (features + info.json) on disk.'
     )
 
     parser.add_argument(
@@ -151,11 +165,11 @@ def _parse_args():
 
 def main():
     args = _parse_args()
-    log_path = utils.check_make_dir(Path(args.root_dir).joinpath(f"{args.data_dir}/logs/"), True)
+    log_path = utils.check_make_dir(_resolve_path(args.root_dir, args.out_dir) / 'logs', True)
     utils.setup_logging(log_file_path=log_path.joinpath('preprocess.log'))
     logger = logging.getLogger(__name__)
 
-    config_params = utils.load_yaml_file(Path(args.root_dir).joinpath(args.config_file))
+    config_params = utils.load_yaml_file(_resolve_path(args.root_dir, args.config_file))
     config_params.update({'args': args})
 
     _process_dataset(**config_params, logger=logger)
