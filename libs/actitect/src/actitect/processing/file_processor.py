@@ -87,8 +87,15 @@ class FileProcessor:
 
         # 1. apply processing if needed
         processed_df, self.info = self._load_or_process_data(operational_kwargs.redo_processing)
-        assert self.info['processing']['all_steps_successful'] is True, \
-            f"Incomplete pre-processing detected, excluding {self.saving_suffix} ..."
+        _processing_is_complete = bool(self.info.get('processing', {}).get('all_steps_successful') is True)
+        if not _processing_is_complete:
+            msg = f'Incomplete pre-processing detected for {self.saving_suffix}'
+            if getattr(operational_kwargs, 'allow_incomplete_preprocessing', False):
+                logger.warning(f"{msg} — continuing because --allow_incomplete_preprocessing was set.")
+                # leave a breadcrumb in the info dict
+                self.info.setdefault('processing', {})['incomplete_preprocessing_allowed'] = True
+            else:
+                raise UserWarning(f"{msg}, excluding ...")
 
         # 2. feature calculation (if specified)
         if not operational_kwargs.skip_feature_calc:

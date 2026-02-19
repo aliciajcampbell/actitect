@@ -40,11 +40,12 @@ def _run_setup():
 
         parser.add_argument('-c', '--config_file', type=str, metavar='FILE',  # rel. to root_dir
                             default='./ActiTect/libs/actitect-rbdisco/src/actitect/rbdisco/configs/external_test.yaml',
-                            help='full path (rel. to root) of the config .yaml file defining preprocessing settings.')
+                            help='full path (rel. to root or abs. path) of the config .yaml file '
+                                 'defining preprocessing settings.')
 
         parser.add_argument('-d', '--processed_data_dir', type=str, nargs='+', metavar='DIR',
                             default=['./data/processed/'],  # rel. to root dir
-                            help='directory (rel. to root) containing the pre-processed data. '
+                            help='directory (rel. to root or abs. path) containing the pre-processed data. '
                                  'Each patient may have subdirectories corresponding to multiple recordings.')
 
         parser.add_argument('--output_dir', type=str, default=None,
@@ -52,7 +53,7 @@ def _run_setup():
 
         parser.add_argument('-m', '--meta_file', type=str, metavar='FILE',
                             default='./data/raw/meta/metadata.csv',  # rel. to root dir
-                            help="meta data file path (rel. to root) that contains list of patients."
+                            help="meta data file path (rel. to root or abs. path) that contains list of patients."
                                  " Has to contain the class labels except for execution in 'predict' mode. ")
 
         parser.add_argument('-ds', '--dataset_tag', type=str, default='external',
@@ -66,14 +67,19 @@ def _run_setup():
             _args.test = True
 
         # cast path-like args into PosixPath types
-        _args.root_dir = Path(_args.root_dir)
-        _args.config_file = _args.root_dir.joinpath(_args.config_file)
-        _args.processed_data_dir = [_args.root_dir.joinpath(_dir) for _dir in _args.processed_data_dir]
+        _args.root_dir = Path(_args.root_dir).expanduser()
+
+        _args.config_file = utils.resolve_root_or_abs_path(_args.root_dir, _args.config_file)
+        _args.processed_data_dir = [
+            utils.resolve_root_or_abs_path(_args.root_dir, _dir) for _dir in _args.processed_data_dir]
+        _args.meta_file = utils.resolve_root_or_abs_path(_args.root_dir, _args.meta_file)
+        if _args.output_dir is not None:
+            _args.output_dir = utils.resolve_root_or_abs_path(_args.root_dir, _args.output_dir)
+
         for p in _args.processed_data_dir:
             assert p.is_dir(), f"Processed-data dir not found: '{p}'"
         if len(_args.processed_data_dir) == 1:
             _args.processed_data_dir = _args.processed_data_dir[0]
-        _args.meta_file = _args.root_dir.joinpath(_args.meta_file)
 
         assert (_args.root_dir.is_dir() and _args.root_dir.joinpath('data').is_dir() and
                 _args.root_dir.joinpath('ActiTect').is_dir()), \

@@ -106,15 +106,15 @@ Please refer to `actitect-process --help` for all options, an overview of the im
   <div id="actitect-file-org"></div>
 
  - **`-d, --data_dir`** <br> 
- **Description:** (str) The directory (relative to `root_dir`) that contains the raw actigraphy files. <br> 
+ **Description:** (str) The directory (relative to `root_dir` or absolute path) that contains the raw actigraphy files. <br> 
  **Default:** `./data/raw/` <br> 
  **Note:** Only needed if binary files should be located outside the default directory. 
 - **`-m, --meta_file`** <br> 
- **Description:** (str) The path to the metadata CSV file, relative to `root_dir`. <br> 
+ **Description:** (str) The path to the metadata CSV file, relative to `root_dir` or abs. path. <br> 
  **Default:** `./data/meta/metadata.csv`<br>
 - **`-o, --out_dir`** <br>
 **Description:** (str) The directory where processed data and features will be stored.<br>
-**Default:** ./data/processed/ (relative to `root_dir`)<br>
+**Default:** ./data/processed/ (relative to `root_dir` or abs. path)<br>
 **Note:** By default, both the processed data and calculated features are stored,
  refer to [Operational flags](#actitect-operational-flags) below to view file saving options.<br>
 </details>
@@ -124,6 +124,9 @@ Please refer to `actitect-process --help` for all options, an overview of the im
   <div id="actitect-operational-flags"></div>
 
 Operational Flags:
+- **`-nr, --no_resume`** <br>
+**Description:** Disable default resume behavior. By default, ActiTect skips records that already have info-*.json and the expected feature CSVs on disk. <br>
+**Default:** resume enabled (flag not set).
 - **`-ns, --no_store`** <br>
 **Description:** When provided, the script saves only the calculated features and not the processed data.<br>
 **Default:** False. <br>
@@ -136,6 +139,10 @@ Operational Flags:
 **Description:**  If enabled, will skip the calculation of motion features.<br>
 **Default:** False. <br>
 **Note:** Use this if you're only interested in the processing part.
+- **`--allow_incomplete_preprocessing`** <br>
+**Description:**  If set, allow to continue downstream logic (feature extraction etc.), 
+if one of the processing steps has failed.<br>
+**Default:** False. <br>
 </details>
   
 **Note:** You have full flexibility over the steps and parameters (e.g. bandpass 
@@ -226,7 +233,7 @@ actitect-rbdisco -d <path>/<to>/<processed>/<data>/<dir> -m <path>/<to>/<meta>/<
 ```
 If you did not change the [default paths](#default-file-org) in the [processing CLI](#actitect-cli-usage-), you can omit the 
 extra options and simply call `actitect-rbdisco`. Please refer to
-`aktiRBD-analysis -h` for more options.
+`actitect-rbdisco -h` for more options.
 The results of the analysis will be stored under `./results/pipeline/run_<date_id>/` and consist of a `.csv` file 
 containing individual predictions and a `.json` file containing classification metrics. 
 

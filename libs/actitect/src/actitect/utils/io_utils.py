@@ -16,7 +16,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 __all__ = ['get_experiment_root', 'load_yaml_file', 'detect_csv_delimiter', 'read_meta_csv_to_df', 'dump_to_json',
-           'read_from_json', 'get_file_extension', 'check_make_dir', 'str_to_snake_case']
+           'read_from_json', 'get_file_extension', 'check_make_dir', 'str_to_snake_case', 'resolve_root_or_abs_path']
 
 
 def check_make_dir(dir_path: Path, use_existing=False, verbose=True, time_extension: bool = True):
@@ -357,8 +357,11 @@ def read_meta_csv_to_df(path_to_csv: Path, exclude: bool = False, verbose: bool 
 
 
 class CustomJsonEncoder(json.JSONEncoder):
-    from skopt.space import Dimension
     """Serializes numpy and pandas objects as JSON."""
+    try:
+        from skopt.space import Dimension as _SkoptDimension
+    except Exception:
+        _SkoptDimension = None
 
     def default(self, obj):
         if isinstance(obj, Path):
@@ -377,7 +380,7 @@ class CustomJsonEncoder(json.JSONEncoder):
             return float(obj)
         elif isinstance(obj, np.ndarray):
             return obj.tolist()
-        elif isinstance(obj, Dimension):
+        elif self._SkoptDimension is not None and isinstance(obj, self._SkoptDimension):
             return self._serialize_dimension(obj)
         elif callable(obj):
             return str(obj)
@@ -480,6 +483,15 @@ def list_subdirectories(base_path: Path, depth: int, stop_names: set = None):
     # Convert the absolute paths in result to paths relative to base_path.
     return [p.relative_to(base_path) for p in result]
 
+
 def str_to_snake_case(text: str):
     """" transform a given str to snake_case format """
     return re.sub(r'\s+', '_', text.strip().lower())
+
+
+def resolve_root_or_abs_path(root_dir: str, maybe_path: str) -> Path:
+    """Backwards-compatible path resolver:
+    - absolute paths are used as-is
+    - relative paths are interpreted relative to root_dir."""
+    p = Path(maybe_path)
+    return p if p.is_absolute() else Path(root_dir).joinpath(p)

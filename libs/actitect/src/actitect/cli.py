@@ -11,17 +11,9 @@ from . import utils
 from .actimeter import SUPPORTED_FILETYPES
 from .processing.file_processor import FileProcessor
 
-
-def _resolve_path(root_dir: str, maybe_path: str) -> Path:
-    """Backwards-compatible path resolver:
-    - absolute paths are used as-is
-    - relative paths are interpreted relative to root_dir."""
-    p = Path(maybe_path)
-    return p if p.is_absolute() else Path(root_dir).joinpath(p)
-
 def _process_dataset(args: argparse.Namespace, processing_kwargs: dict, feature_kwargs: dict, logger: logging.Logger):
-    _data_dir = _resolve_path(args.root_dir, args.data_dir)
-    _meta_file = _resolve_path(args.root_dir, args.meta_file)
+    _data_dir = utils.resolve_root_or_abs_path(args.root_dir, args.data_dir)
+    _meta_file = utils.resolve_root_or_abs_path(args.root_dir, args.meta_file)
     assert _data_dir.is_dir(), f"the passed 'data_dir' must exist and be a directory! ({_data_dir})."
     assert _meta_file.is_file(), f"can't find 'metadata.csv' file {_meta_file}."
 
@@ -30,7 +22,7 @@ def _process_dataset(args: argparse.Namespace, processing_kwargs: dict, feature_
 
     if not _raw_files:
         raise UserWarning(f"No actigraphy files found at {_data_dir}")
-    save_dir = utils.check_make_dir(_resolve_path(args.root_dir, args.out_dir), use_existing=True)
+    save_dir = utils.check_make_dir(utils.resolve_root_or_abs_path(args.root_dir, args.out_dir), use_existing=True)
 
     _excluded = {}
     with utils.custom_tqdm(total=len(_raw_files), position=0, leave=True) as pbar:
@@ -61,9 +53,10 @@ def _process_dataset(args: argparse.Namespace, processing_kwargs: dict, feature_
                     gc.collect()
 
             except NotImplementedError as _ne:
-                logger.warning(f"NotImplementError {_ne} encountered in process_single_file({_rec_label})."
-                               f"Might be caused by unknown 'feature_mode' variable: "
-                               f"Got '{feature_kwargs['feature_mode']}, currently implemented: 'per_night'")
+                logger.warning(
+                    f"NotImplementedError {_ne} encountered in process_single_file({_rec_label}). "
+                    f"Might be caused by unknown 'feature_mode': got '{feature_kwargs.get('feature_mode')}', "
+                    f"implemented: 'per_night'.")
                 logger.warning(f"Excluded: {_rec_label}")
                 _excluded.update({_rec_label: f"{_ne}"})
             except UserWarning as _uw:
@@ -156,20 +149,27 @@ def _parse_args():
 
     parser.add_argument(
         '--ax6_legacy_mode', action='store_true', default=False,
-        help='Earlier Ax6 parsing code from Openmovement i used had some issues with duplicate timestamps and '
-             'checksums.Use this flag to reproduce this behavior to repdruce results.'
+        help='Earlier Ax6 parsing code from Openmovement had some issues with duplicate timestamps and '
+             'checksums. Use this flag to reproduce this behavior, for backwards reproducibility only.'
     )
+
+    parser.add_argument(
+    '--allow_incomplete_preprocessing', action='store_true', default=False,
+        help = 'If set, do NOT exclude records when preprocessing is incomplete'
+               ' (i.e., processing["all_steps_successful"] != True).'
+               ' Instead, continue with downstream steps (features etc.).')
+
 
     return parser.parse_args()
 
 
 def main():
     args = _parse_args()
-    log_path = utils.check_make_dir(_resolve_path(args.root_dir, args.out_dir) / 'logs', True)
+    log_path = utils.check_make_dir(utils.resolve_root_or_abs_path(args.root_dir, args.out_dir) / 'logs', True)
     utils.setup_logging(log_file_path=log_path.joinpath('preprocess.log'))
     logger = logging.getLogger(__name__)
 
-    config_params = utils.load_yaml_file(_resolve_path(args.root_dir, args.config_file))
+    config_params = utils.load_yaml_file(utils.resolve_root_or_abs_path(args.root_dir, args.config_file))
     config_params.update({'args': args})
 
     _process_dataset(**config_params, logger=logger)
