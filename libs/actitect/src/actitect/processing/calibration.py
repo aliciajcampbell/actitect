@@ -57,10 +57,17 @@ def van_hees_sphere_calibration(data: pd.DataFrame, clb_params=CalibParams()):
     del nonzero
 
     if len(sphere) < clb_params.min_num_stat_samples:  # check if sufficient n° of stationary samples for calibration
-        info['calib_ok'] = 0
-        info['calib_error_before(mg)'], info['calib_error_before(mg)'] = np.nan, np.nan
-        logger.warning(f"skipping calibration: insufficient number of stationary samples found:"
-                       f"{len(sphere)} < {clb_params.min_num_stat_samples}")
+        info.update({
+            'calib_ok': 0,
+            'calib_status': 'insufficient_stationary_samples',
+            'calib_num_samples': int(len(sphere)),
+            'calib_min_required': int(clb_params.min_num_stat_samples),
+            'calib_error_before(mg)': np.nan,
+            'calib_error_after(mg)': np.nan,
+        })
+        logger.warning(
+            f"skipping calibration: insufficient stationary samples "
+            f"({len(sphere)} < {clb_params.min_num_stat_samples})")
         return data, info
 
     offset = np.array([0.0, 0.0, 0.0], dtype=sphere.dtype)
@@ -81,9 +88,13 @@ def van_hees_sphere_calibration(data: pd.DataFrame, clb_params=CalibParams()):
     # check if stationary points are sufficiently distributed within calibration cube range along all axes
     if (np.max(sphere, axis=0) < clb_params.calibration_cube_range_threshold).any() \
             or (np.min(sphere, axis=0) > -clb_params.calibration_cube_range_threshold).any():
-        info['calib_ok'] = 0
-        info['calib_error_after(mg)'] = init_err * 1000
-        logger.warning(f"skipping calibration: insufficient number of uniformly distributed stationary points.")
+        info.update({
+            'calib_ok': 0,
+            'calib_status': 'insufficient_axis_distribution',
+            'calib_error_after(mg)': init_err * 1000,
+            'calib_cube_threshold': clb_params.calibration_cube_range_threshold,
+        })
+        logger.warning("skipping calibration: insufficient distribution of stationary points across axes.")
         return data, info
 
     for iteration in range(clb_params.fit_max_iter):  # iterative closest point fitting process
@@ -121,7 +132,12 @@ def van_hees_sphere_calibration(data: pd.DataFrame, clb_params=CalibParams()):
 
     info['calib_error_after(mg)'] = best_err * 1_000
     if (best_err > clb_params.error_tolerance) or (iteration + 1 == clb_params.fit_max_iter):
-        info['calib_ok'] = 0  # either best_error still larger than tolerance or iterations > maximum n° of iterations
+        info.update({ # either best_error still larger than tolerance or iterations > maximum n° of iterations
+            'calib_ok': 0,
+            'calib_status': 'did_not_converge',
+            'calib_error_after(mg)': best_err * 1000,
+            'calib_error_tolerance': clb_params.error_tolerance,
+        })
         return data, info
 
     else:  # calibration successful, update data
@@ -149,8 +165,14 @@ def van_hees_sphere_calibration(data: pd.DataFrame, clb_params=CalibParams()):
             data = mmap2df(data_mmap, copy=True)
             del data_mmap
 
-        info.update({'calib_ok': 1, 'calib_num_iter': iteration+1, 'calib_num_samples': len(sphere),
-                     'calib_offset(xyz)': best_offset, 'calib_gain(xyz)': best_gain})
+        info.update({
+            'calib_ok': 1,
+            'calib_status': 'success',
+            'calib_num_iter': iteration + 1,
+            'calib_num_samples': len(sphere),
+            'calib_offset(xyz)': best_offset,
+            'calib_gain(xyz)': best_gain
+        })
         if _use_temperature:
             info.update({'calib_gain_temp(xyz)': best_gain_temperature})
 

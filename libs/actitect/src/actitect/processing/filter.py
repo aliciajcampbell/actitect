@@ -25,36 +25,48 @@ def butterworth_bandpass(data: pd.DataFrame, fs: int, lowcut: float, highcut: fl
     Returns:
         :return: (DataFrame) with same dimensions as 'data', containing the filtered data. """
 
+    info = {}
+
     signal = data[['x', 'y', 'z']].to_numpy()
     f_nyq = fs // 2
+
     if lowcut is not None:
-        assert 0 < lowcut < f_nyq, f"Lowcut frequency ({lowcut}Hz) must be in (0, f_nyq = fs/2 = {f_nyq}Hz)."
+        if not (0 < lowcut < f_nyq):
+            info.update({'ok': 0,'status': f"lowcut_out_of_range: {lowcut} not in (0, {f_nyq})"})
+            return data, info
+
     if highcut is not None:
-        assert 0 < highcut < f_nyq, f"Highcut frequency ({highcut}Hz) must be in (0, f_nyq = fs/2 = {f_nyq}Hz)."
+        if not (0 < highcut < f_nyq):
+            info.update({'ok': 0, 'status': f"highcut_out_of_range: {highcut} not in (0, {f_nyq})"})
+            return data, info
 
     if lowcut is not None and highcut is not None:
-        assert lowcut < highcut, f"Lowcut frequency ({lowcut}Hz) must be less than highcut frequency ({highcut}Hz)"
+        if not (lowcut < highcut):
+            info.update({'ok': 0, 'status': "lowcut_not_smaller_than_highcut"})
+            return data, info
         _btype = 'bandpass'
         _wn = [lowcut / f_nyq, highcut / f_nyq]
-        logger.debug(f"applying bandpass with f_low={lowcut:.3f}Hz={_wn[0]:.3f}*f_nyq "
-                     f"and f_high={highcut:.3f}Hz={_wn[1]:.3f}*f_nyq")
+
     elif lowcut is not None:
         _btype = 'highpass'
         _wn = lowcut / f_nyq
-        logger.debug(f"applying highpass with f_low={lowcut:.2f}Hz={_wn:.2f}*f_nyq")
     elif highcut is not None:
         _btype = 'lowpass'
         _wn = highcut / f_nyq
-        logger.debug(f"applying lowpass with f_high={highcut:.2f}Hz={_wn:.2f}*f_nyq")
     else:
-        raise ValueError("At least one of lowcut and highcut must be provided.")
+        info.update({'ok': 0, 'status': "no_cutoff_provided"})
+        return data, info
 
-    sos = scsig.butter(degree, _wn, btype=_btype, analog=False, output='sos')
-    signal_filtered = scsig.sosfiltfilt(sos, signal, axis=axis)
-    data[['x', 'y', 'z']] = signal_filtered.astype(data.dtypes.iloc[0], copy=False)
-    del sos
-    del signal_filtered
-    return data
+    try:
+        sos = scsig.butter(degree, _wn, btype=_btype, analog=False, output='sos')
+        signal_filtered = scsig.sosfiltfilt(sos, signal, axis=axis)
+        data[['x', 'y', 'z']] = signal_filtered.astype(data.dtypes.iloc[0], copy=False)
+        info.update({'ok': 1,'status': 1})
+
+    except Exception as e:
+        info.update({'ok': 0,'status': f"{type(e).__name__}: {e}"})
+
+    return data, info
 
 
 def butterworth_bandpass_array(signal: np.ndarray, fs: int, lowcut: float, highcut: float, degree=5, axis=0):

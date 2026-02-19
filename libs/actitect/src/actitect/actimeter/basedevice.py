@@ -59,7 +59,7 @@ class BaseDevice(ABC):
             raw_df: Optional[pd.DataFrame] = None,
             header: Optional[dict] = None):
 
-        self.raw_df = None
+        self.raw_df: pd.DataFrame = None
         self.meta = {'patient_id': patient_id, 'raw_data_loaded': False, 'processed_data': False}
         self.binary_header = {}
         self.processing_info = {'all_steps_successful': None, 'loading': {'filepath': filepath}, 'resampling': {},
@@ -71,18 +71,23 @@ class BaseDevice(ABC):
             assert filepath is None, f"if 'raw_df' is provided, the 'filepath' must be None."
             self.set_raw_data(raw_df, header=header)
 
-    def load_raw_data(self, resolve_duplicates: bool = True, header_only: bool = False):
+    def load_raw_data(self, resolve_duplicates: bool = True, header_only: bool = False, *,
+                      max_days: Optional[float] = None):
         """ Wrapper for the binary parser. Loads the raw data into time-indexed pd.DataFrame.
         Parameters:
             :param resolve_duplicates: (bool) whether to check and resolve duplicate time indices.
             :param header_only: (bool) if True, will only load the header from the binary, not the data.
+            :param max_days: (float, Optional) if set, truncate the data to first 'max_days' days.
         Returns:
             :return:  (pd.Dataframe): the raw data with columns 'x,'y', and 'z' (in units of g) """
 
         fp = self.processing_info['loading'].get('filepath')
         if self.meta['raw_data_loaded'] and not header_only:  # already loaded or preset, just return it
             logger.info(f"(io: {self.meta['patient_id']}) using preloaded raw data.")
-            return self.raw_df
+            raw_df, trunc_info = self._truncate_if_too_long(
+                self.raw_df, max_days=max_days, log_id=self.meta['patient_id'])
+            self.processing_info.setdefault("loading", {}).update(trunc_info)
+            return raw_df
         if header_only and self.binary_header:
             logger.info(f"(io: {self.meta['patient_id']}) header already available (preloaded).")
             return self.binary_header
@@ -96,6 +101,10 @@ class BaseDevice(ABC):
                     f"(io: {self.meta['patient_id']}) parsing data from"
                     f" '{self.processing_info['loading']['filepath'].name}'.")
                 raw_df, header = self._parse_binary_to_df(header_only=header_only)
+                raw_df, trunc_info = self._truncate_if_too_long(
+                    raw_df, max_days=max_days, log_id=self.meta['patient_id'])
+                self.processing_info.setdefault('loading', {}).update(trunc_info)
+
                 if not header_only:
                     utils.assert_valid_df(raw_df)
                     if resolve_duplicates:
@@ -148,7 +157,8 @@ class BaseDevice(ABC):
         self._set_logging_start_end_from_raw_df(raw_df, fs_hint=mean_fs)
 
     def process(self, resample_rate: Union[int, str] = 'infer', lowpass_hz: float = None, highpass_hz: float = None,
-                calibrate: bool = False, detect_nonwear: bool = False, detect_sleep: bool = False):
+                calibrate: bool = False, detect_nonwear: bool = False, detect_sleep: bool = False,
+                max_days: int = None) -> pd.DataFrame:
         """ Run the pipeline to pre-process the raw recorded data based on the specified settings.
         Parameters:
             :param resample_rate: (int or 'infer'') If int, the target sample rate for resampling, if 'infer',the
@@ -158,10 +168,12 @@ class BaseDevice(ABC):
             :param calibrate: (bool, Optional) If True, skip the auto-calibration.
             :param detect_nonwear: (bool, Optional) If True, perform non-wear segmentation.
             :param detect_sleep: (bool, Optional) If True, perform sleep segmentation.
+            :param max_days: (float, Optional) If set, truncate raw recording to 'max_days' days.
         Returns:
             :return: (pd.DataFrame) the pre-processed data as pd.Dataframe with time-index and
                 columns 'x','y','z', 'wear' and 'sleep'. """
-        raw_df = self._check_load_raw_data()
+
+        raw_df = self._check_load_raw_data(max_days=max_days)
 
         # 1. resample to uniform sample rate if necessary and apply lowpass filter:
         if resample_rate is not None:
@@ -260,7 +272,7 @@ class BaseDevice(ABC):
             if not (np.isclose(_mean_fs, target_fs, rtol=1e-5, atol=1e-8) or _is_uniform):
                 _status = (f"error: resampling rate ({_mean_fs:.2f} Hz does not match target ({target_fs:.2f} Hz))"
                            f"or is not uniform (std = {_std_fs} Hz).")
-                raise ValueError(f"Resampling failed: {_status}")
+                raise RuntimeError(f"Resampling failed: {_status}")
 
             self.processing_info['resampling'].update(
                 {'resample_fs_is_uniform': _is_uniform, 'resample_fs_mean': _mean_fs,
@@ -273,7 +285,14 @@ class BaseDevice(ABC):
          'filter_name' indicates if it is the high/lowpass for correct info logging."""
         kwargs['fs'] = (self.processing_info['resampling'].get('resample_fs_mean')
                         or np.ceil(self.processing_info['resampling'].get('raw_fs_mean'))).astype('int')
-        x_df = processing.butterworth_bandpass(x_df, **kwargs)
+        x_df, info = processing.butterworth_bandpass(x_df, **kwargs)
+        self.processing_info['filter'].update({filter_name: info})
+        ok = info.get('ok', None)
+        if ok in (0, False):
+            status = info.get('status', 'filter_failed')
+            msg = info.get('status_msg', '')
+            raise RuntimeError(f"{filter_name} failed: {status}" + (f" ({msg})" if msg else ""))
+
         utils.assert_valid_df(x_df)
 
         self.processing_info['filter'].update({f"{filter_name}": {'kwargs': kwargs}})
@@ -284,9 +303,10 @@ class BaseDevice(ABC):
         """ Perform auto-calibration to align axis."""
         x_df, _info = processing.van_hees_sphere_calibration(x_df)
         utils.assert_valid_df(x_df)
-        _status = _info.pop('calib_ok')
-        if _status == 0:
-            raise ValueError(f'Calibration failed with status {_status}.')
+        calib_ok = _info.get('calib_ok', 0)
+        if calib_ok == 0:
+            reason = _info.get('calib_status', 'unknown_failure')
+            raise RuntimeError(f'Calibration failed: {reason}')
 
         logger.info(f"(calibration: {self.meta['patient_id']}) calibration error summary: "
                     f"before={_info['calib_error_before(mg)']:.2f}mg after={_info['calib_error_after(mg)']:.2f}mg."
@@ -327,7 +347,7 @@ class BaseDevice(ABC):
         if 'wear' in x_df.columns:
             x_df, (_init_num_amb, _final_num_amb) = self._resolve_nonwear_sleep(x_df, _sptw, self.resolve_nw_params)
             if _init_num_amb:
-                logger.info(f"(sleep: {self.meta['patient_id']})found non-wear/sleep ambiguities,"
+                logger.info(f"(sleep: {self.meta['patient_id']}) found non-wear/sleep ambiguities,"
                             f"resolved {_init_num_amb} -> {_final_num_amb}")
                 self.processing_info['sleep_nonwear_ambiguities'].update({'num_init_segments': _init_num_amb,
                                                                           'num_final_segments': _final_num_amb})
@@ -519,11 +539,14 @@ class BaseDevice(ABC):
 
         return x_df, (num_init_ambiguities, num_remaining_ambiguities)
 
-    def _check_load_raw_data(self):
+    def _check_load_raw_data(self, *, max_days: Optional[float] = None):
         if not self.meta['raw_data_loaded']:
-            return self.load_raw_data()
+            return self.load_raw_data(max_days=max_days)
         else:
-            return self.raw_df
+            raw_df, trunc_info = self._truncate_if_too_long(
+                self.raw_df, max_days=max_days, log_id=self.meta['patient_id'])
+            self.processing_info.setdefault("loading", {}).update(trunc_info)
+            return raw_df
 
     def _set_logging_start_end_from_raw_df(
             self, raw_df: pd.DataFrame, *,
@@ -602,3 +625,56 @@ class BaseDevice(ABC):
         inst = cls(filepath=None, patient_id=patient_id, resolve_nw_params=resolve_nw_params)
         inst.set_raw_data(raw_df, header=header)
         return inst
+
+    @staticmethod
+    def _span_days(x_df: Optional[pd.DataFrame]) -> tuple[Optional[pd.Timestamp], Optional[pd.Timestamp], float]:
+        if x_df is None or x_df.empty:
+            return None, None, float("nan")
+        t0, t1 = x_df.index.min(), x_df.index.max()
+        return pd.Timestamp(t0), pd.Timestamp(t1), float((t1 - t0).total_seconds() / 86_400)
+
+    def _truncate_if_too_long(
+            self, x_df: pd.DataFrame, *, max_days: Optional[float], log_id: str) -> tuple[pd.DataFrame, dict]:
+        """Truncates a given dataframe to 'max_days'. Used in cases where device was not turned off after wear."""
+        t0, t1, span_days = self._span_days(x_df)
+        info = {
+            'raw_span_days_pre_trunc': span_days,
+            'raw_start_pre_trunc': t0,
+            'raw_end_pre_trunc': t1,
+            'raw_trunc_max_days': max_days,
+            'raw_was_truncated': False,
+        }
+
+        if not max_days or x_df is None or x_df.empty or not np.isfinite(span_days):
+            info.update({
+                'raw_span_days_post_trunc': span_days,
+                'raw_start_post_trunc': t0,
+                'raw_end_post_trunc': t1,
+            })
+            return x_df, info
+
+        if span_days <= max_days:
+            info.update({
+                'raw_span_days_post_trunc': span_days,
+                'raw_start_post_trunc': t0,
+                'raw_end_post_trunc': t1,
+            })
+            return x_df, info
+
+        cutoff = t0 + pd.Timedelta(days=max_days)
+        logger.warning(f"(io: {log_id}) recording spans {span_days:.2f} days. Truncating to first {max_days} days.")
+
+        y_df = x_df.loc[x_df.index <= cutoff]
+        t0b, t1b, span_days_b = self._span_days(y_df)
+
+        info.update({
+            'raw_was_truncated': True,
+            'raw_trunc_cutoff': pd.Timestamp(cutoff),
+            'raw_span_days_post_trunc': span_days_b,
+            'raw_start_post_trunc': t0b,
+            'raw_end_post_trunc': t1b,
+            'raw_num_ticks_pre_trunc': int(x_df.shape[0]),
+            'raw_num_ticks_post_trunc': int(y_df.shape[0]),
+        })
+        return y_df, info
+

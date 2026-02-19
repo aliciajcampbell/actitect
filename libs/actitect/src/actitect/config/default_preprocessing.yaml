@@ -6,6 +6,7 @@ processing_kwargs:
   calibrate: True            # whether to perform gravity calibration (boolean)
   detect_nonwear: True       # whether to perform non-wear detection (boolean)
   detect_sleep: True         # whether to perform sleep segmentation (boolean)
+  max_days: 21               # safeguard for cases where recording was not stopped, will truncate to first 'max_days'
 
 feature_kwargs:
   mode: 'per_night'
