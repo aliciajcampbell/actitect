@@ -3,7 +3,7 @@ import logging
 import sys
 import warnings
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -27,14 +27,16 @@ __all__ = ['FeatureRanker']
 class FeatureRanker:
 
     def __init__(self, root_dir: Path, data_config: DataConfig, n_jobs: int,
-                 draw_plots: bool = False, random_state: int = 42):
+                 draw_plots: bool = False, random_state: int = 42, legacy_mode: bool = False):
         """Class to run different feature ranking algorithms and produce an ensemble ranking to identify the best
         features.
         Parameters:
             :param data_config: (DataConfig) instance containing meta-info of the data.
             :param root_dir: (Path) defining the root directory where ranking files are stored.
             :param n_jobs: (int) to handle parallel-processing.
-            :param draw_plots: (bool. default False) whether to draw a summary plot or not."""
+            :param draw_plots: (bool. default False) whether to draw a summary plot or not.
+            :param legacy_mode: (bool. default False) legacy mode to restore old versions, currently only relevant
+                for correlation based rankings after speed implementation (should be only O(e-16) difference though.)"""
 
         self.data = None  # populate in entry point .fetch_or_compute()
         self.data_config = data_config
@@ -43,6 +45,8 @@ class FeatureRanker:
         self.n_jobs = n_jobs
         self.draw_plots = draw_plots
         self.random_state = random_state
+        self.legacy_mode = legacy_mode
+
         self.ranking_file_postfix = f"combined_rankings_{self.data_config.agg_level}.csv"
         self.method_dispatch = {
             'mrmr': self._run_mrmr,
@@ -371,7 +375,7 @@ class FeatureRanker:
                 feat_map_no_constants = self.data.feat_map
 
             label_corr, inter_corr = self._compute_correlations(
-                x_train_no_constants, self.data.y, n_features, self.n_jobs)
+                x_train_no_constants, self.data.y, n_features, self.n_jobs, legacy_mode=self.legacy_mode)
 
             # create ranking for feat2label correlations: (mean over pearson, kendall, spearman)
             _label_corr_mean = np.nanmean([_label_corr for _label_corr in label_corr.values()], axis=0)
@@ -524,53 +528,141 @@ class FeatureRanker:
             ranking.loc[nan_ranks, 'rank'] = len(ranking)
             ranking = ranking.sort_values(by='rank').set_index('rank')
             ranking.to_csv(_out_dir.joinpath(f"rbd_vs_hc_{self.data_config.agg_level}.csv"))
-            logger.info(f"evaluated variance. ({timer()}s)")
+            logger.info(f"evaluated statistical significances. ({timer()}s)")
 
         return {f"{self.data_config.agg_level}": ranking}
 
     @staticmethod
-    def _compute_correlations(x_train_no_constants, _y_true_train, _n_features, _n_jobs):
+    def _compute_correlations(
+            x_train_no_constants: np.ndarray, _y_true_train: np.ndarray, _n_features: int, _n_jobs: int,
+            *, legacy_mode: bool = False) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+        """ One backend with two modes.
+        legacy_mode=True:
+            exact older behavior:
+              - label: pearson/spearman/kendall via scipy per feature
+              - inter: pearson/spearman/kendall via scipy per pair (lower-tri filled), diag=1
+        legacy_mode=False (optimized for speedup in case of large n features):
+            - label: pearson + spearman vectorized; kendall parallel (kept)
+            - inter: pearson matrix vectorized; spearman/kendall returned as NaN matrices (diag=1)"""
+        X = np.asarray(x_train_no_constants, dtype=float)
+        y = np.asarray(_y_true_train, dtype=float)
+        assert X.ndim == 2, "X must be 2D"
+        assert X.shape[1] == _n_features, f"X has {X.shape[1]} cols but _n_features={_n_features}"
 
-        _label_corr = {'pearson': np.zeros(_n_features),
-                       'spearman': np.zeros(_n_features),
-                       'kendall': np.zeros(_n_features)}
-        _inter_corr = {'pearson': np.zeros((_n_features, _n_features)),
-                       'spearman': np.zeros((_n_features, _n_features)),
-                       'kendall': np.zeros((_n_features, _n_features))}
+        if legacy_mode:
+            _label_corr = {
+                "pearson": np.zeros(_n_features, dtype=float),
+                "spearman": np.zeros(_n_features, dtype=float),
+                "kendall": np.zeros(_n_features, dtype=float),
+            }
+            _inter_corr = {
+                "pearson": np.zeros((_n_features, _n_features), dtype=float),
+                "spearman": np.zeros((_n_features, _n_features), dtype=float),
+                "kendall": np.zeros((_n_features, _n_features), dtype=float),
+            }
 
-        def __compute_for_feature(i):
-            _pr_label, _ = stats.pearsonr(x_train_no_constants[:, i], _y_true_train)
-            _sr_label, _ = stats.spearmanr(x_train_no_constants[:, i], _y_true_train)
-            _kr_label, _ = stats.kendalltau(x_train_no_constants[:, i], _y_true_train)
-            _label_corr_result = (i, _pr_label, _sr_label, _kr_label)
+            def __compute_for_feature(i: int):
+                _pr_label, _ = stats.pearsonr(X[:, i], y)
+                _sr_label, _ = stats.spearmanr(X[:, i], y)
+                _kr_label, _ = stats.kendalltau(X[:, i], y)
+                _label_corr_result = (i, _pr_label, _sr_label, _kr_label)
 
-            _inter_corr_results = []
-            for _j in range(i + 1, _n_features):
-                _pr_inter, _ = stats.pearsonr(x_train_no_constants[:, i], x_train_no_constants[:, _j])
-                _sr_inter, _ = stats.spearmanr(x_train_no_constants[:, i], x_train_no_constants[:, _j])
-                _kr_inter, _ = stats.kendalltau(x_train_no_constants[:, i], x_train_no_constants[:, _j])
-                _inter_corr_results.append((_j, i, _pr_inter, _sr_inter, _kr_inter))
+                _inter_corr_results = []
+                for _j in range(i + 1, _n_features):
+                    _pr_inter, _ = stats.pearsonr(X[:, i], X[:, _j])
+                    _sr_inter, _ = stats.spearmanr(X[:, i], X[:, _j])
+                    _kr_inter, _ = stats.kendalltau(X[:, i], X[:, _j])
+                    _inter_corr_results.append((_j, i, _pr_inter, _sr_inter, _kr_inter))
 
-            return _label_corr_result, _inter_corr_results
+                return _label_corr_result, _inter_corr_results
 
-        # Parallel computation for both label and inter-feature correlations
-        with Parallel(n_jobs=_n_jobs) as corr_executor:
-            results = corr_executor(delayed(__compute_for_feature)(i) for i in range(_n_features))
+            with Parallel(n_jobs=_n_jobs) as corr_executor:
+                results = corr_executor(delayed(__compute_for_feature)(i) for i in range(_n_features))
 
-        for label_corr_result, inter_corr_results in results:
-            i, pr, sr, kr = label_corr_result
-            _label_corr['pearson'][i] = pr
-            _label_corr['spearman'][i] = sr
-            _label_corr['kendall'][i] = kr
+            for label_corr_result, inter_corr_results in results:
+                i, pr, sr, kr = label_corr_result
+                _label_corr["pearson"][i] = pr
+                _label_corr["spearman"][i] = sr
+                _label_corr["kendall"][i] = kr
 
-            for j, i, corr_pearson, corr_spearman, corr_kendall in inter_corr_results:
-                _inter_corr['pearson'][j, i] = corr_pearson
-                _inter_corr['spearman'][j, i] = corr_spearman
-                _inter_corr['kendall'][j, i] = corr_kendall
+                for j, i2, corr_pearson, corr_spearman, corr_kendall in inter_corr_results:
+                    _inter_corr["pearson"][j, i2] = corr_pearson
+                    _inter_corr["spearman"][j, i2] = corr_spearman
+                    _inter_corr["kendall"][j, i2] = corr_kendall
 
-        np.fill_diagonal(_inter_corr['pearson'], 1)
-        np.fill_diagonal(_inter_corr['spearman'], 1)
-        np.fill_diagonal(_inter_corr['kendall'], 1)
+            np.fill_diagonal(_inter_corr["pearson"], 1.0)
+            np.fill_diagonal(_inter_corr["spearman"], 1.0)
+            np.fill_diagonal(_inter_corr["kendall"], 1.0)
+            return _label_corr, _inter_corr
+
+        # -------- optimized mode below --------
+
+        def _safe_zscore_cols(A: np.ndarray, eps: float = 1e-12) -> Tuple[np.ndarray, np.ndarray]:
+            """
+            Column-wise z-score using population variance (mean of squares).
+            Returns (Az, std). Constant cols -> all-zeros in Az, std=0.
+            """
+            mu = np.mean(A, axis=0)
+            Ac = A - mu
+            var = np.mean(Ac * Ac, axis=0)
+            std = np.sqrt(var)
+            denom = np.where(std < eps, 1.0, std)  # avoid div0
+            Az = Ac / denom
+            return Az, std
+
+        def _pearson_feat_to_y(A: np.ndarray, b: np.ndarray) -> np.ndarray:
+            b = b.astype(float)
+            bc = b - np.mean(b)
+            b_std = np.sqrt(np.mean(bc * bc))
+            if b_std == 0:
+                return np.full(A.shape[1], np.nan, dtype=float)
+
+            Az, Astd = _safe_zscore_cols(A)
+            bz = bc / b_std
+            corr = np.mean(Az * bz[:, None], axis=0)
+            corr = np.where(Astd == 0, np.nan, corr)  # match scipy pearsonr for constant X
+            return corr
+
+        def _spearman_feat_to_y(A: np.ndarray, b: np.ndarray) -> np.ndarray:
+            Ar = stats.rankdata(A, axis=0)
+            br = stats.rankdata(b)
+            return _pearson_feat_to_y(Ar, br)
+
+        def _kendall_feat_to_y_parallel(A: np.ndarray, b: np.ndarray, n_jobs: int) -> np.ndarray:
+            def one(i: int) -> float:
+                v, _ = stats.kendalltau(A[:, i], b)
+                return v
+
+            return np.array(Parallel(n_jobs=n_jobs)(delayed(one)(i) for i in range(A.shape[1])), dtype=float)
+
+        def _pearson_inter_matrix(A: np.ndarray) -> np.ndarray:
+            Az, Astd = _safe_zscore_cols(A)
+            n = float(A.shape[0])
+            C = (Az.T @ Az) / n
+
+            const = (Astd == 0)
+            if np.any(const):
+                C[const, :] = np.nan
+                C[:, const] = np.nan
+            np.fill_diagonal(C, 1.0)
+            return C
+
+        # label: pearson + spearman vectorized; kendall kept (parallel)
+        pr = _pearson_feat_to_y(X, y)
+        sr = _spearman_feat_to_y(X, y)
+        kr = _kendall_feat_to_y_parallel(X, y, n_jobs=_n_jobs)
+
+        _label_corr = {"pearson": pr, "spearman": sr, "kendall": kr}
+
+        # inter: pearson fast; spearman/kendall placeholders (keys preserved)
+        pearson_mat = _pearson_inter_matrix(X)
+
+        spearman_mat = np.full_like(pearson_mat, np.nan, dtype=float)
+        kendall_mat = np.full_like(pearson_mat, np.nan, dtype=float)
+        np.fill_diagonal(spearman_mat, 1.0)
+        np.fill_diagonal(kendall_mat, 1.0)
+
+        _inter_corr = {"pearson": pearson_mat, "spearman": spearman_mat, "kendall": kendall_mat}
         return _label_corr, _inter_corr
 
     @staticmethod
