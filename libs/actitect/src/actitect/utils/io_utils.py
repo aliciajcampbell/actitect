@@ -135,7 +135,9 @@ def detect_csv_delimiter(filepath: Union[str, Path], *, sample_size: int = 1 << 
         candidates = [',', ';', '\t', '|', ':']
 
     # 1. collect test sample
-    sample = path.read_text('utf-8', errors='ignore')[:sample_size]
+    with path.open('rb') as f:
+        raw = f.read(sample_size)
+    sample = raw.decode("utf-8", errors="ignore")
     if not sample:
         logger.warning("empty file – falling back to default delimiter %r", fallback)
         return fallback
