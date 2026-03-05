@@ -71,7 +71,7 @@ after this, you should see
 
 You can use the general purpose actigraphy toolkit either as a CLI tool or directly via a light, pythonic API.
 The supported actigraphy file formats are
-- **Axivity AX6:** `.cwa`
+- **Axivity AX3/AX6:** `.cwa`
 - **GENEActiv:** `.bin`
 - **ActiGraph:** `.gt3x` 
 - **Generic:** `.csv` 

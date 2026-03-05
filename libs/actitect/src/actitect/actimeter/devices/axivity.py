@@ -14,7 +14,7 @@ import pandas as pd
 from ..basedevice import BaseDevice
 from ... import utils
 
-__all__ = ['AxivityAx6']
+__all__ = ['Axivity']
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ def checksum16(view_u2: np.ndarray) -> int:
 
 
 @dataclass
-class Ax6BinaryFormat:
+class AxBinaryFormat:
     BLOCK_SIZE: int = 512
 
     _Header = namedtuple("_Header", "device_frac session_id sequence_id ts_packed light_raw temp_raw "
@@ -205,12 +205,12 @@ class Ax6BinaryFormat:
         return data
 
 
-class AxivityAx6(BaseDevice):
+class Axivity(BaseDevice):
     """Adapted from [1]. https://github.com/openmovementproject/openmovement-python/ at
     25f546389af518ff184818ca96a4f92e9275b951"""
 
     def __init__(self, path_to_cwa: Path, patient_id: str, kwargs: dict = None,
-                 AX6FORMAT: Ax6BinaryFormat = Ax6BinaryFormat(), legacy_mode: bool = False):
+                 AX6FORMAT: AxBinaryFormat = AxBinaryFormat(), legacy_mode: bool = False):
         super().__init__(filepath=path_to_cwa, patient_id=patient_id)
         self.AX6FORMAT = AX6FORMAT
         self.legacy_mode = legacy_mode  # flag to reproduce legacy code in [1] by matching timestamp interpolation error
@@ -218,9 +218,10 @@ class AxivityAx6(BaseDevice):
         self._ts_lut = self._build_fast_ts_lut()
         self.kwargs = kwargs if kwargs \
             else {'include_gyro': False, 'include_temperature': False, 'include_light': False, 'include_mag': False}
+        self._device_type = None
 
     def __str__(self):
-        return f"AxivityAx6(patient_ID='{self.meta['patient_id']}')"
+        return f"Axivity(patient_ID='{self.meta['patient_id']}')"
 
     def _parse_binary_to_df(self, ax6_logging_threshold_d: int = 8, header_only: bool = False):
         """ Parse the binary file and return it as pd.Dataframe.
@@ -238,6 +239,7 @@ class AxivityAx6(BaseDevice):
             # parse the header, i.e., the first block
             header_block = buffer[:self.AX6FORMAT.BLOCK_SIZE]
             header = self._parse_header(header_block)
+            self._device_type = header.get('deviceType')
             if header_only:
                 return pd.DataFrame(), header
 
@@ -484,11 +486,21 @@ class AxivityAx6(BaseDevice):
 
         raw_bytes = blocks['raw_data_buffer'].flatten().tobytes()
         if bytes_per_axis == 0 and channels == 3:
-            raw_dw = np.frombuffer(raw_bytes, dtype='<I', count=total_samples)
-            exp = raw_dw >> 30
-            sample_values[:, 1] = ((((raw_dw >> 0) & 0x3ff) ^ 0x200) - 0x200) << exp
-            sample_values[:, 2] = ((((raw_dw >> 10) & 0x3ff) ^ 0x200) - 0x200) << exp
-            sample_values[:, 3] = ((((raw_dw >> 20) & 0x3ff) ^ 0x200) - 0x200) << exp
+            if self._device_type == 'AX3':
+                raw_dw = np.frombuffer(raw_bytes, dtype='<u4', count=total_samples)
+                exp = (raw_dw >> 30).astype(np.int32)
+                x10 = (raw_dw & 0x3ff).astype(np.int32)
+                y10 = ((raw_dw >> 10) & 0x3ff).astype(np.int32)
+                z10 = ((raw_dw >> 20) & 0x3ff).astype(np.int32)
+                sample_values[:, 1] = ((x10 ^ 0x200) - 0x200) << exp
+                sample_values[:, 2] = ((y10 ^ 0x200) - 0x200) << exp
+                sample_values[:, 3] = ((z10 ^ 0x200) - 0x200) << exp
+            else:
+                raw_dw = np.frombuffer(raw_bytes, dtype='<I', count=total_samples)
+                exp = raw_dw >> 30
+                sample_values[:, 1] = ((((raw_dw >> 0) & 0x3ff) ^ 0x200) - 0x200) << exp
+                sample_values[:, 2] = ((((raw_dw >> 10) & 0x3ff) ^ 0x200) - 0x200) << exp
+                sample_values[:, 3] = ((((raw_dw >> 20) & 0x3ff) ^ 0x200) - 0x200) << exp
         elif bytes_per_axis == 2:
             raw_w = np.frombuffer(raw_bytes, dtype='<h').reshape((-1, channels))
             sample_values[:, 1:4] = raw_w[:, accel_axis:accel_axis + 3]

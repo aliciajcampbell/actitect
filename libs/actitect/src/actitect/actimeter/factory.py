@@ -5,14 +5,14 @@ from typing import Union
 import pandas as pd
 
 from .. import utils
-from .devices import ActiGraph, AxivityAx6, Generic, GENEActiv
+from .devices import ActiGraph, AxivityAx, Generic, GENEActiv
 
 __all__ = ['ActimeterFactory', 'SUPPORTED_FILETYPES']
 
 logger = logging.getLogger(__name__)
 
-EXT_2_DEVICE_MAP = {'.cwa': AxivityAx6, '.bin': GENEActiv, '.gt3x': ActiGraph, '.csv': Generic}
-DEVICE_KWARGS_MAP = {AxivityAx6: {'legacy_mode'}, GENEActiv: set(), ActiGraph: set(), Generic: set()}
+EXT_2_DEVICE_MAP = {'.cwa': AxivityAx, '.bin': GENEActiv, '.gt3x': ActiGraph, '.csv': Generic}
+DEVICE_KWARGS_MAP = {AxivityAx: {'legacy_mode'}, GENEActiv: set(), ActiGraph: set(), Generic: set()}
 SUPPORTED_FILETYPES = sorted(list(EXT_2_DEVICE_MAP.keys()))
 
 

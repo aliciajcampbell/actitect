@@ -48,7 +48,7 @@ def _processing_step(step_name: str):
 class BaseDevice(ABC):
     """Abstract class representing different actimeter devices such as Axivity Ax6, GENEActive etc. Is used to load
     and optionally pre-process data from a given recording of the specified devices. Provides the public methods 
-    'load_raw_data' and 'process' for this purpose. Subclasses like e.g. AxivityAx6 or GENEActive must implement 
+    'load_raw_data' and 'process' for this purpose. Subclasses like e.g. Axivity or GENEActive must implement
     the logic to parse the binary data in the abstract methods '__str__' and '_parse_binary_to_df'."""
 
     def __init__(
