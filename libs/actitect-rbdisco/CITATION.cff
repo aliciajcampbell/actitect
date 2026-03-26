@@ -8,35 +8,65 @@ type: software
 authors:
   - family-names: "Bertram"
     given-names: "David"
-    # orcid: "https://orcid.org/0000-0000-0000-0000"
+    orcid: "https://orcid.org/0009-0004-6765-564X
 
-# repository-code: "https://github.com/OWNER/REPO"
-# url: "https://github.com/OWNER/REPO"
-# license: "PolyForm-Noncommercial-1.0.0"
-# keywords:
+repository-code: "https://github.com/bozeklab/actitect
+url: "https://github.com/bozeklab/actitect"
+license: "PolyForm-Noncommercial-1.0.0"
+keywords:
   - actigraphy
   - sleep
   - RBD
   - machine-learning
-# version: "0.3.1"
-# date-released: "2025-10-02"
-# preferred-citation:
-#  type: article
-#  title: "Title of the associated paper"
-#  authors:
-#    - family-names: "LastName"
-#      given-names: "FirstName"
-#      orcid: "https://orcid.org/0000-0000-0000-0000"
-
-#  journal: "Journal Name"
-#  volume: ""
-#  issue: ""
-#  start: ""
-#  end: ""
-#  year: 2025
-#  doi: "10.0000/placeholder.doi"
-#identifiers:
-#  - type: doi
-#    value: "10.0000/placeholder.doi"   # Zenodo DOI for the release, once minted
-  # - type: url
-  #   value: "https://zenodo.org/record/XXXXX"
+version: "1.0.0"
+date-released: "2025-11-07"
+preferred-citation:
+  type: article
+  title: "ActiTect: A Generalizable Machine Learning Pipeline for REM Sleep Behavior Disorder Screening through Standardized Actigraphy"
+  authors:
+  - family-names: "Bertram"
+    given-names: "David"
+  - family-names: "Ophey"
+    given-names: "Anja"
+  - family-names: "Röttgen"
+    given-names: "Sinah"
+  - family-names: "Kuffer"
+    given-names: "Konstantin"
+  - family-names: "Fink"
+    given-names: "Gereon R."
+  - family-names: "Kalbe"
+    given-names: "Elke"
+  - family-names: "Hansen"
+    given-names: "Clint"
+  - family-names: "Maetzler"
+    given-names: "Walter"
+  - family-names: "Kapsecker"
+    given-names: "Maximilian"
+  - family-names: "Reimer"
+    given-names: "Lara M."
+  - family-names: "Jonas"
+    given-names: "Stephan"
+  - family-names: "Damgaard"
+    given-names: "Andreas T."
+  - family-names: "Bertelsen"
+    given-names: "Natasha B."
+  - family-names: "Skjaerbaek"
+    given-names: "Casper"
+  - family-names: "Borghammer"
+    given-names: "Per"
+  - family-names: "Groenewald"
+    given-names: "Karolien"
+  - family-names: "Ratti"
+    given-names: "Pietro-Luca"
+  - family-names: "Hu"
+    given-names: "Michele T."
+  - family-names: "Moreau"
+    given-names: "Noémie"
+  - family-names: "Sommerauer"
+    given-names: "Michael"
+  - family-names: "Bozek"
+    given-names: "Katarzyna"
+  journal: "arXiv preprint"
+  year: 2025
+  doi: "https://doi.org/10.48550/arXiv.2511.05221"
+  url: "https://arxiv.org/abs/2511.05221"
